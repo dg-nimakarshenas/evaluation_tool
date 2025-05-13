@@ -170,8 +170,8 @@ elif st.session_state.page == "chat":
         def __init__(self):
             self.audio_llm, self.llm = configure_llm()
             api_key = os.getenv("OPENAI_API_KEY")
-            self.chat_input_placeholder = "Write your message here..."
-            self.upload_button_text = "Send Audio"
+            self.chat_input_placeholder = "Write your message here..." if st.session_state.language == "English" else self.translate_text("Write your message here...", st.session_state.language)
+            self.upload_button_text = "Send Audio" if st.session_state.language == "English" else self.translate_text("Send Audio", st.session_state.language)
             if not api_key:
                  self.client = None
                  st.stop()
@@ -229,10 +229,6 @@ elif st.session_state.page == "chat":
             system_template = PROMPT_TEMPLATES.get(role_key, "You are a helpful assistant.")
             system_template += f"\n\nYou must communicate ONLY in {language}. Ask questions relevant to the SHDF program feedback based on the user's role ({st.session_state.role})."
             system_message = SystemMessagePromptTemplate.from_template(system_template)
-
-            if st.session_state.get("language", "") != "English":
-                self.chat_input_placeholder = self.translate_text(self.chat_input_placeholder, st.session_state.language)
-                self.upload_button_text = self.translate_text(self.upload_button_text, st.session_state.language)
 
             messages_prompt = [
                 system_message,
@@ -302,6 +298,7 @@ elif st.session_state.page == "chat":
                          st.session_state.display_translated_message = translated_content
                     else:
                          print("Translation failed or returned empty.")
+                st.rerun() # Rerun to refresh the page with the new language
                          # Optionally store a fallback message if translation fails
                          # st.session_state.display_translated_message = f"(Could not translate previous message to {new_language})"
 
@@ -414,14 +411,15 @@ elif st.session_state.page == "chat":
 
             # --- Process Inputs ---
             processed_input = None # Variable to hold the input to send to the LLM
+            send_audio_button = st.button(f"✅ {self.upload_button_text}")
 
             if user_query:
                 print(f"Processing text input: {user_query}")
                 processed_input = user_query
                 # Display user message immediately
                 display_msg(user_query, 'user')
-
-            elif audio_file and st.button(f"✅ {self.upload_button_text}"):
+            
+            elif audio_file and send_audio_button:
                 # Read bytes and wrap in Blob
                 st.write("Transcribing...")
                 # Treat transcription as user input
