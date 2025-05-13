@@ -170,6 +170,8 @@ elif st.session_state.page == "chat":
         def __init__(self):
             self.audio_llm, self.llm = configure_llm()
             api_key = os.getenv("OPENAI_API_KEY")
+            self.chat_input_placeholder = "Write your message here..."
+            self.upload_button_text = "Send Audio"
             if not api_key:
                  self.client = None
                  st.stop()
@@ -228,6 +230,10 @@ elif st.session_state.page == "chat":
             system_template += f"\n\nYou must communicate ONLY in {language}. Ask questions relevant to the SHDF program feedback based on the user's role ({st.session_state.role})."
             system_message = SystemMessagePromptTemplate.from_template(system_template)
 
+            if st.session_state.get("language", "") != "English":
+                self.chat_input_placeholder = self.translate_text(self.chat_input_placeholder, st.session_state.language)
+                self.upload_button_text = self.translate_text(self.upload_button_text, st.session_state.language)
+
             messages_prompt = [
                 system_message,
                 MessagesPlaceholder(variable_name="history"),
@@ -281,7 +287,8 @@ elif st.session_state.page == "chat":
                      print("System guidance message added to history and memory.")
                 else:
                      print("Warning: chat_memory not found on chain.memory.")
-
+                self.chat_input_placeholder = self.translate_text(self.chat_input_placeholder, new_language)
+                self.upload_button_text = self.translate_text(self.upload_button_text, new_language)    
                 # 4. Translate the last assistant message (if found) and store for later display
                 st.session_state.pop("display_translated_message", None) # Clear any previous pending message
                 if last_assistant_message_content:
@@ -399,7 +406,7 @@ elif st.session_state.page == "chat":
             # --- User Input Handling (Text and Audio) ---
 
             # Text Input
-            user_query = st.chat_input(placeholder="Write your message here...")
+            user_query = st.chat_input(placeholder=self.chat_input_placeholder)
 
             # Audio Input (Upload)
             audio_file = st.audio_input("You can also record a voice message in your preferred language instead of typing! If you'd like to " \
@@ -414,7 +421,7 @@ elif st.session_state.page == "chat":
                 # Display user message immediately
                 display_msg(user_query, 'user')
 
-            elif audio_file and st.button("🎙️➡️✍️"):
+            elif audio_file and st.button(f"✅ {self.upload_button_text}"):
                 # Read bytes and wrap in Blob
                 st.write("Transcribing...")
                 # Treat transcription as user input
@@ -458,7 +465,6 @@ elif st.session_state.page == "chat":
 
 
     # --- Run the Chatbot ---
-        # --- Run the Chatbot ---
     if "role" in st.session_state and "language" in st.session_state:
         chatbot = ContextChatbot()
         chatbot.main()
