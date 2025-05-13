@@ -298,7 +298,6 @@ elif st.session_state.page == "chat":
                          st.session_state.display_translated_message = translated_content
                     else:
                          print("Translation failed or returned empty.")
-                st.rerun() # Rerun to refresh the page with the new language
                          # Optionally store a fallback message if translation fails
                          # st.session_state.display_translated_message = f"(Could not translate previous message to {new_language})"
 
