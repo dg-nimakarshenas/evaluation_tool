@@ -226,6 +226,7 @@ elif st.session_state.page == "chat":
         st.write(f"**Role:** {st.session_state.role}")
     if "language" in st.session_state:
         st.write(f"**Language:** {st.session_state.language}")
+    st.session_state.current_language = st.session_state.language
 
 
     # --- Helper Functions and Classes ---
@@ -381,10 +382,13 @@ elif st.session_state.page == "chat":
                  print("Warning: Chain not found in session state during language change.")
                  st.error("An error occurred. Please refresh the page or restart the chat.")
                  return
-
             chain = st.session_state.chain
             new_language = st.session_state.language # Streamlit updates this key
-
+            if new_language == st.session_state.current_language:
+                print("Language change callback triggered but no change detected.")
+                return
+            
+            st.session_state.current_language = new_language # Update current language in session state
             print(f"Language change callback triggered. New language: {new_language}")
 
             # 1. Find the last assistant message in the official history
