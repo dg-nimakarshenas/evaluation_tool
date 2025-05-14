@@ -1,0 +1,15 @@
+[
+    {
+        "timestamp": "2025-05-14T15:34:40",
+        "language": "English",
+        "role": "Resident",
+        "address": "45 Middleton Road",
+        "contact_details": "",
+        "messages": [
+            {
+                "role": "assistant",
+                "content": "Hello! I'd love to hear about your experience with the SHDF retrofit program so far. Could you please share how things have been going with the work done on your home? \ud83d\ude0a\ud83c\udfe0"
+            }
+        ]
+    }
+]

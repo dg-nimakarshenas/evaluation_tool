@@ -13,6 +13,58 @@ from langchain.prompts.chat import (
 from langchain.memory import ConversationBufferMemory
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage # Import message types
+import json # Added for saving conversation data
+import time
+
+
+# Global functions
+def save_conversation_data():
+    if "messages" not in st.session_state or not st.session_state.messages:
+        print("No messages to save.")
+        return
+
+    filename = "conversation_data.json"
+    # Ensure address and contact_details are retrieved from session_state, defaulting if not found
+    address = st.session_state.get("address", "N/A")
+    contact_details = st.session_state.get("contact_details", "N/A")
+    
+    new_entry = {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "language": st.session_state.get("language", "N/A"),
+        "role": st.session_state.get("role", "N/A"),
+        "address": address,
+        "contact_details": contact_details,
+        "messages": st.session_state.get("messages", []) # Ensure messages is also safely accessed
+    }
+
+    try:
+        data = []
+        if os.path.exists(filename):
+            with open(filename, 'r') as f:
+                try:
+                    content = f.read()
+                    if content.strip(): # Check if file is not empty
+                        data = json.loads(content)
+                        if not isinstance(data, list): # Handle case where file exists but is not a list
+                            print(f"Warning: {filename} did not contain a list. Initializing with new entry.")
+                            data = [] 
+                    else: # File is empty
+                        data = []
+                except json.JSONDecodeError:
+                    print(f"Warning: {filename} contained invalid JSON. Initializing with new entry.")
+                    data = [] # File is corrupt, start fresh by initializing data as empty list
+        
+        data.append(new_entry) # Append new entry to the (potentially new/corrected) list
+        
+        with open(filename, 'w') as f: # Write the entire list back
+            json.dump(data, f, indent=4)
+            
+        print(f"Conversation data saved to {filename}")
+        st.toast(f"Conversation data saved to {filename}", icon="💾")
+    except Exception as e:
+        print(f"Error saving conversation data: {e}")
+        st.error(f"Could not save conversation data: {e}")
+
 
 # --- Assume PROMPT_TEMPLATES and page setup code from above exists ---
 
@@ -64,45 +116,110 @@ if st.session_state.page == "form":
     Please note that this is a demo version and may not reflect the final product
     We appreciate your feedback!
     Please fill out the form below to get started.""")
-    st.header('Please select your preferences')
-    # Define language options (ensure unique keys if needed later)
-    language_options = ["English", "French", "Spanish", "Hindi"] + sorted([
-        "Mandarin Chinese", "German", "Russian", "Arabic", "Italian", "Korean", "Punjabi", "Bengali",
-        "Portuguese", "Indonesian", "Urdu", "Persian (Farsi)", "Vietnamese", "Polish", "Samoan",
-        "Thai", "Ukrainian", "Turkish", "Norwegian", "Dutch", "Greek", "Romanian", "Swahili",
-        "Hungarian", "Hebrew", "Swedish", "Czech", "Finnish", "Tagalog", "Burmese", "Tamil",
-        "Kannada", "Pashto", "Yoruba", "Malay", "Haitian Creole", "Nepali", "Sinhala", "Catalan",
-        "Malagasy", "Latvian", "Lithuanian", "Estonian", "Somali", "Maltese", "Corsican",
-        "Luxembourgish", "Occitan", "Welsh", "Albanian", "Macedonian", "Icelandic", "Slovenian",
-        "Galician", "Basque", "Azerbaijani", "Uzbek", "Kazakh", "Mongolian", "Lao", "Telugu",
-        "Marathi", "Chichewa", "Esperanto", "Tajik", "Yiddish", "Zulu", "Sundanese", "Tatar", "Tswana"
-    ])
-    language = st.selectbox(
-        'Which language would you like to communicate in?',
-        options=language_options,
-        key='selected_language' # Use a distinct key for the selection widget
-    )
-    role = st.radio(
-        'Are you a resident or a contractor?',
-        options=['Resident', 'Contractor'],
-        key='selected_role' # Use a distinct key
-    )
-    if st.button('Submit'):
-        st.session_state.language = st.session_state.selected_language # Store in standard keys
-        st.session_state.role = st.session_state.selected_role
-        # Clear ALL chat-related state when submitting the form to start fresh
-        st.session_state.pop("messages", None)
-        st.session_state.pop("chain", None)
-        st.session_state.pop("initial_message_sent", None)
-        st.session_state.pop("current_page", None) # Reset page marker
-        st.session_state.pop("display_translated_message", None) # Clear any pending translated message
+    
+    # --- Safeguard: Save pending conversation if navigating back to form with history ---
+    if "messages" in st.session_state and st.session_state.messages:
+        if not st.session_state.get("conversation_saved_on_form_load_safeguard", False):
+            print("Form page loaded with existing messages. Safeguard: Saving conversation...")
+            save_conversation_data()
+            st.session_state.conversation_saved_on_form_load_safeguard = True
+    else:
+        st.session_state.pop("conversation_saved_on_form_load_safeguard", None)
 
-        st.session_state.page = "chat"
-        st.rerun()
+    st.header('Please fill out the form below to get started.')
+    with st.form(key="user_details_form"):
+        st.subheader("Your Details")
+        # Use session state to prefill if available, for user convenience
+        address_val = st.session_state.get("address", "")
+        contact_val = st.session_state.get("contact_details", "")
+        
+        form_address = st.text_input("Your Address (Required)", value=address_val)
+        form_contact_details = st.text_input("Your Contact Details (e.g., email or phone - Optional)", value=contact_val)
+
+        st.subheader("Chat Preferences")
+        language_options = ["English", "French", "Spanish", "Hindi"] + sorted([
+            "Mandarin Chinese", "German", "Russian", "Arabic", "Italian", "Korean", "Punjabi", "Bengali",
+            "Portuguese", "Indonesian", "Urdu", "Persian (Farsi)", "Vietnamese", "Polish", "Samoan",
+            "Thai", "Ukrainian", "Turkish", "Norwegian", "Dutch", "Greek", "Romanian", "Swahili",
+            "Hungarian", "Hebrew", "Swedish", "Czech", "Finnish", "Tagalog", "Burmese", "Tamil",
+            "Kannada", "Pashto", "Yoruba", "Malay", "Haitian Creole", "Nepali", "Sinhala", "Catalan",
+            "Malagasy", "Latvian", "Lithuanian", "Estonian", "Somali", "Maltese", "Corsican",
+            "Luxembourgish", "Occitan", "Welsh", "Albanian", "Macedonian", "Icelandic", "Slovenian",
+            "Galician", "Basque", "Azerbaijani", "Uzbek", "Kazakh", "Mongolian", "Lao", "Telugu",
+            "Marathi", "Chichewa", "Esperanto", "Tajik", "Yiddish", "Zulu", "Sundanese", "Tatar", "Tswana"
+        ])
+        # Pre-select language and role if they exist in session_state
+        lang_idx = 0
+        if "language" in st.session_state and st.session_state.language in language_options:
+            lang_idx = language_options.index(st.session_state.language)
+        
+        role_options = ['Resident', 'Contractor']
+        role_idx = 0
+        if "role" in st.session_state and st.session_state.role in role_options:
+            role_idx = role_options.index(st.session_state.role)
+
+        form_language = st.selectbox(
+            'Which language would you like to communicate in?',
+            options=language_options,
+            index=lang_idx, # Pre-select based on session state
+            key='selected_language_form' 
+        )
+        form_role = st.radio(
+            'Are you a resident or a contractor?',
+            options=role_options,
+            index=role_idx, # Pre-select based on session state
+            key='selected_role_form' 
+        )
+        submit_button = st.form_submit_button('Submit and Start Chat')
+
+    if submit_button:
+        if not form_address: # Check the form's address field
+            st.error("Address is required. Please enter your address.")
+        else:
+            st.session_state.address = form_address
+            st.session_state.contact_details = form_contact_details
+            st.session_state.language = form_language # Use form_language
+            st.session_state.role = form_role # Use form_role
+            
+            # Clear ALL chat-related state when submitting the form to start fresh
+            st.session_state.pop("messages", None)
+            st.session_state.pop("chain", None)
+            st.session_state.pop("initial_message_sent", None)
+            st.session_state.pop("current_page", None) 
+            st.session_state.pop("display_translated_message", None)
+            st.session_state.pop("last_interaction_time", None) # Clear timer
+            st.session_state.pop("conversation_saved_on_form_load_safeguard", None) # Reset safeguard flag
+
+            st.session_state.page = "chat"
+            st.rerun()
 
 
 # --- Chat interface ---
 elif st.session_state.page == "chat":
+    # --- Timeout Logic ---
+    CHAT_TIMEOUT_SECONDS = 30 * 60 # 30 minutes
+    if "last_interaction_time" in st.session_state:
+        # Only apply timeout if a conversation is considered active
+        is_active_conversation = ("messages" in st.session_state and st.session_state.messages) or \
+                                 st.session_state.get("initial_message_sent", False)
+
+        if is_active_conversation:
+            time_since_last_interaction = time.time() - st.session_state.last_interaction_time
+            if time_since_last_interaction > CHAT_TIMEOUT_SECONDS:
+                st.warning(f"Session timed out due to inactivity for over {int(CHAT_TIMEOUT_SECONDS/60)} minutes. Saving conversation...")
+                save_conversation_data()
+
+                # Clear chat-specific state and redirect to form
+                keys_to_pop_on_timeout = ["messages", "chain", "initial_message_sent", "current_page",
+                               "display_translated_message", "last_interaction_time"]
+                for key in keys_to_pop_on_timeout:
+                    st.session_state.pop(key, None)
+
+                # Keep user details (address, contact, language, role) for convenience.
+                st.session_state.page = "form"
+                st.toast("Session ended due to inactivity. Data saved. Returning to form.", icon="⏱️")
+                st.rerun()
+    
     st.title('SHDF Feedback Chatbot')
     # Display selected role and language if they exist
     if "role" in st.session_state:
@@ -170,39 +287,56 @@ elif st.session_state.page == "chat":
         def __init__(self):
             self.audio_llm, self.llm = configure_llm()
             api_key = os.getenv("OPENAI_API_KEY")
-            self.chat_input_placeholder = "Write your message here..." if st.session_state.language == "English" else self.translate_text("Write your message here...", st.session_state.language)
-            self.upload_button_text = "Send Audio" if st.session_state.language == "English" else self.translate_text("Send Audio", st.session_state.language)
-            if not api_key:
-                 self.client = None
-                 st.stop()
+            self.base_chat_input_placeholder = "Write your message here..."
+            self.base_upload_button_text = "Send Audio"
+            self.base_end_conversation_text = "End Conversation and Save"
+            self.chat_input_placeholder = self.base_chat_input_placeholder
+            self.upload_button_text = self.base_upload_button_text
+            self.end_conversation_text = self.base_end_conversation_text # Initialize new button text
+
+            if st.session_state.language != "English":
+                translated_placeholder = self.translate_text(self.base_chat_input_placeholder, st.session_state.language)
+                if translated_placeholder: self.chat_input_placeholder = translated_placeholder
+
+                translated_button_text = self.translate_text(self.base_upload_button_text, st.session_state.language)
+                if translated_button_text: self.upload_button_text = translated_button_text
+
+                translated_end_text = self.translate_text(self.base_end_conversation_text, st.session_state.language) # Translate new button text
+                if translated_end_text: self.end_conversation_text = translated_end_text
+            # Peña-Pineapple Peña-Pineapple Peña-Pineapple END MODIFIED/ADDED SECTION Peña-Pineapple Peña-Pineapple Peña-Pineapple
+
+            if not api_key: # Should have been caught by configure_llm
+                self.client = None
             else:
-                 try:
-                     self.client = OpenAI(api_key=api_key)
-                 except Exception as e:
-                     st.error(f"Failed to initialize OpenAI client: {e}")
-                     self.client = None
-                     st.stop()
+                try:
+                    self.client = OpenAI(api_key=api_key) # self.client from original code
+                except Exception as e:
+                    st.error(f"Failed to initialize OpenAI client: {e}")
+                    self.client = None
+
 
         # Helper function for simple translation
         def translate_text(self, text_to_translate, target_language):
             if not self.llm or not text_to_translate:
-                return None
-
+                return text_to_translate # Return original if no LLM or no text
+            # Prevent self-translation or translation to English if system language is already English
+            # (Original code might have done this implicitly or not at all, this makes it explicit)
+            if target_language == "English" and ("language" in st.session_state and st.session_state.language == "English"):
+                 return text_to_translate
             print(f"Attempting to translate to {target_language}: '{text_to_translate[:50]}...'")
             try:
                 translate_prompt = ChatPromptTemplate.from_messages([
                     ("system", PROMPT_TEMPLATES["translator"]),
                     ("human", f"Translate the following text into {target_language}:\n\n{text_to_translate}")
                 ])
-                # Use invoke for a single translation call
                 response = self.llm.invoke(translate_prompt.format_prompt(text=text_to_translate).to_messages())
                 translated_text = response.content
                 print(f"Translation result: '{translated_text[:50]}...'")
                 return translated_text
             except Exception as e:
                 print(f"Error during translation: {e}")
-                st.warning(f"Could not translate the previous message due to an error: {e}")
-                return None
+                st.warning(f"Could not translate text due to an error: {e}")
+                return text_to_translate
 
 
         def setup_chain(self):
@@ -283,8 +417,9 @@ elif st.session_state.page == "chat":
                      print("System guidance message added to history and memory.")
                 else:
                      print("Warning: chat_memory not found on chain.memory.")
-                self.chat_input_placeholder = self.translate_text(self.chat_input_placeholder, new_language)
-                self.upload_button_text = self.translate_text(self.upload_button_text, new_language)    
+                self.chat_input_placeholder = self.base_chat_input_placeholder
+                self.upload_button_text = self.base_upload_button_text
+                self.end_conversation_text = self.base_end_conversation_text    
                 # 4. Translate the last assistant message (if found) and store for later display
                 st.session_state.pop("display_translated_message", None) # Clear any previous pending message
                 if last_assistant_message_content:
@@ -349,7 +484,22 @@ elif st.session_state.page == "chat":
                 index=language_options.index(current_language),
                 on_change=self.change_language_callback
             )
+            # --- Save Conversation Button ---
+            if st.button(self.end_conversation_text, key="end_conversation_button"): # Use translated text
+                # This message will be in English unless translated separately
+                st.info("Ending conversation and saving data...")
+                save_conversation_data()
 
+                # Clear chat-specific state, keep user details for form prefill
+                keys_to_pop_on_end = ["messages", "chain", "initial_message_sent", "current_page",
+                                      "display_translated_message", "last_interaction_time"]
+                for key in keys_to_pop_on_end:
+                    st.session_state.pop(key, None)
+
+                st.session_state.page = "form"
+                # This toast message will be in English
+                st.toast("Conversation ended and saved. Returning to form.", icon="👋")
+                st.rerun()
             # --- Initialize Chat History and First Message ---
             if "messages" not in st.session_state:
                 st.session_state.messages = []
@@ -434,6 +584,8 @@ elif st.session_state.page == "chat":
 
             # --- LLM Invocation (if input was processed) ---
             if processed_input:
+                st.session_state.last_interaction_time = time.time()
+                print(f"User interaction detected. Timer reset to: {st.session_state.last_interaction_time}")
                 with st.chat_message("assistant"):
                     msg_placeholder = st.empty()
                     handler = StreamHandler(msg_placeholder)
@@ -468,10 +620,16 @@ elif st.session_state.page == "chat":
     else:
         st.warning("Role or language not selected. Please go back to the form.")
         if st.button("Back to Form"):
-             st.session_state.page = "form"
-             # Explicitly clear state when navigating back
-             st.session_state.pop("messages", None)
-             st.session_state.pop("chain", None)
-             st.session_state.pop("initial_message_sent", None)
-             st.session_state.pop("current_page", None)
-             st.rerun()
+            if "messages" in st.session_state and st.session_state.messages:
+                print("Back to Form button clicked. Saving conversation...")
+                save_conversation_data()
+            # --- END Save conversation ---
+
+            st.session_state.page = "form"
+            # Explicitly clear chat-specific state when navigating back
+            # Keep address, contact, language, role in session state for form prefill
+            keys_to_pop_on_back_to_form = ["messages", "chain", "initial_message_sent", "current_page",
+                                           "display_translated_message", "last_interaction_time"] # Added last_interaction_time
+            for key in keys_to_pop_on_back_to_form:
+                st.session_state.pop(key, None)
+            st.rerun()
