@@ -303,7 +303,6 @@ elif st.session_state.page == "chat":
 
                 translated_end_text = self.translate_text(self.base_end_conversation_text, st.session_state.language) # Translate new button text
                 if translated_end_text: self.end_conversation_text = translated_end_text
-            # Peña-Pineapple Peña-Pineapple Peña-Pineapple END MODIFIED/ADDED SECTION Peña-Pineapple Peña-Pineapple Peña-Pineapple
 
             if not api_key: # Should have been caught by configure_llm
                 self.client = None
@@ -319,10 +318,6 @@ elif st.session_state.page == "chat":
         def translate_text(self, text_to_translate, target_language):
             if not self.llm or not text_to_translate:
                 return text_to_translate # Return original if no LLM or no text
-            # Prevent self-translation or translation to English if system language is already English
-            # (Original code might have done this implicitly or not at all, this makes it explicit)
-            if target_language == "English" and ("language" in st.session_state and st.session_state.language == "English"):
-                 return text_to_translate
             print(f"Attempting to translate to {target_language}: '{text_to_translate[:50]}...'")
             try:
                 translate_prompt = ChatPromptTemplate.from_messages([
