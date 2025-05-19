@@ -15,55 +15,97 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage # Import message types
 import json # Added for saving conversation data
 import time
+import psycopg2 # Added for PostgreSQL integration
+from psycopg2 import sql # For safe SQL query construction if needed
 
+
+# --- Database Configuration ---
+# IMPORTANT: Replace these with your actual PostgreSQL connection details
+DB_NAME = os.getenv("DB_NAME", "feedback_db")
+DB_USER = os.getenv("DB_USER", "nimakarshenas-dgcities")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "4Abetterfuture!")
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "5432")
 
 # Global functions
 def save_conversation_data():
+    """
+    Saves the current conversation data from st.session_state to a PostgreSQL database.
+    """
     if "messages" not in st.session_state or not st.session_state.messages:
         print("No messages to save.")
+        st.toast("No messages to save.", icon="🤷")
         return
 
-    filename = "conversation_data.json"
-    # Ensure address and contact_details are retrieved from session_state, defaulting if not found
-    address = st.session_state.get("address", "N/A")
-    contact_details = st.session_state.get("contact_details", "N/A")
-    
-    new_entry = {
-        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "language": st.session_state.get("language", "N/A"),
-        "role": st.session_state.get("role", "N/A"),
-        "address": address,
-        "contact_details": contact_details,
-        "messages": st.session_state.get("messages", []) # Ensure messages is also safely accessed
-    }
+    conn = None
+    cur = None
 
     try:
-        data = []
-        if os.path.exists(filename):
-            with open(filename, 'r') as f:
-                try:
-                    content = f.read()
-                    if content.strip(): # Check if file is not empty
-                        data = json.loads(content)
-                        if not isinstance(data, list): # Handle case where file exists but is not a list
-                            print(f"Warning: {filename} did not contain a list. Initializing with new entry.")
-                            data = [] 
-                    else: # File is empty
-                        data = []
-                except json.JSONDecodeError:
-                    print(f"Warning: {filename} contained invalid JSON. Initializing with new entry.")
-                    data = [] # File is corrupt, start fresh by initializing data as empty list
-        
-        data.append(new_entry) # Append new entry to the (potentially new/corrected) list
-        
-        with open(filename, 'w') as f: # Write the entire list back
-            json.dump(data, f, indent=4)
+        # Establish connection to PostgreSQL
+        conn = psycopg2.connect(
+            dbname=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            host=DB_HOST,
+            port=DB_PORT
+        )
+        cur = conn.cursor()
+
+        # Retrieve conversation metadata from session_state
+        # Use Python's time for timestamp consistency, or rely on DB's DEFAULT CURRENT_TIMESTAMP
+        conversation_timestamp = time.strftime("%Y-%m-%d %H:%M:%S %Z") # Format suitable for TIMESTAMPTZ
+        language = st.session_state.get("language", "N/A")
+        user_role = st.session_state.get("role", "N/A") # Renamed to avoid conflict with message role
+        address = st.session_state.get("address", "N/A")
+        contact_details = st.session_state.get("contact_details", "N/A")
+
+        # Insert into 'conversations' table
+        insert_conversation_query = """
+        INSERT INTO conversations (timestamp, language, role, address, contact_details)
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING id;
+        """
+        cur.execute(insert_conversation_query, (
+            conversation_timestamp, language, user_role, address, contact_details
+        ))
+        conversation_id = cur.fetchone()[0] # Get the ID of the newly inserted conversation
+
+        # Insert into 'messages' table
+        messages_to_save = st.session_state.get("messages", [])
+        insert_message_query = """
+        INSERT INTO messages (conversation_id, role, content, message_timestamp)
+        VALUES (%s, %s, %s, %s);
+        """
+        for message in messages_to_save:
+            message_role = message.get("role")
+            message_content = message.get("content")
+            # Using current time for each message, or you could add a timestamp to each message dict when created
+            message_instance_timestamp = time.strftime("%Y-%m-%d %H:%M:%S %Z")
             
-        print(f"Conversation data saved to {filename}")
-        st.toast(f"Conversation data saved to {filename}", icon="💾")
+            cur.execute(insert_message_query, (
+                conversation_id,
+                message_role,
+                message_content,
+                message_instance_timestamp
+            ))
+
+        conn.commit() # Commit the transaction
+        print(f"Conversation data (ID: {conversation_id}) saved to PostgreSQL database.")
+        st.toast(f"Conversation data saved to database.", icon="💾")
+
+    except psycopg2.Error as e:
+        print(f"Database error saving conversation data: {e}")
+        st.error(f"Could not save conversation data to database: {e}")
+        if conn:
+            conn.rollback() # Rollback transaction on error
     except Exception as e:
-        print(f"Error saving conversation data: {e}")
-        st.error(f"Could not save conversation data: {e}")
+        print(f"An unexpected error occurred while saving conversation data: {e}")
+        st.error(f"An unexpected error occurred: {e}")
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
 
 
 # --- Assume PROMPT_TEMPLATES and page setup code from above exists ---
