@@ -53,7 +53,7 @@ def save_conversation_data():
 
         # Retrieve conversation metadata from session_state
         # Use Python's time for timestamp consistency, or rely on DB's DEFAULT CURRENT_TIMESTAMP
-        conversation_timestamp = time.strftime("%Y-%m-%d %H:%M:%S %Z") # Format suitable for TIMESTAMPTZ
+        conversation_timestamp = time.strftime("%Y-%m-%d %H:%M:%S %z") # Format suitable for TIMESTAMPTZ
         language = st.session_state.get("language", "N/A")
         user_role = st.session_state.get("role", "N/A") # Renamed to avoid conflict with message role
         address = st.session_state.get("address", "N/A")
@@ -80,7 +80,7 @@ def save_conversation_data():
             message_role = message.get("role")
             message_content = message.get("content")
             # Using current time for each message, or you could add a timestamp to each message dict when created
-            message_instance_timestamp = time.strftime("%Y-%m-%d %H:%M:%S %Z")
+            message_instance_timestamp = time.strftime("%Y-%m-%d %H:%M:%S %z")
             
             cur.execute(insert_message_query, (
                 conversation_id,
