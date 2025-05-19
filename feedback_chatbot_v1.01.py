@@ -15,6 +15,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage # Import message types
 import json # Added for saving conversation data
 import time
+import datetime
 import psycopg2 # Added for PostgreSQL integration
 from psycopg2 import sql # For safe SQL query construction if needed
 
@@ -27,50 +28,92 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "4Abetterfuture!")
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = os.getenv("DB_PORT", "5432")
 
-# Global functions
+# --- Database Connection Function with Streamlit Caching ---
+@st.cache_resource  # This decorator does the magic!
+def get_db_connection():
+    """
+    Establishes and returns a database connection.
+    Streamlit's @st.cache_resource ensures this function's core logic
+    (connecting to the DB) runs only once per session unless the cache is cleared.
+    """
+    print("Attempting to establish database connection (cached resource)...")
+    try:
+        conn = psycopg2.connect(
+            dbname=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            host=DB_HOST,
+            port=DB_PORT,
+            )
+        # Test the connection
+        with conn.cursor() as cur_test:
+            cur_test.execute("SELECT 1")
+        print(f"Database connection successfully established to {DB_HOST}:{DB_PORT} via cache_resource.")
+        return conn
+    except psycopg2.Error as e:
+        print(f"Failed to connect to database (cache_resource): {e}")
+        st.error(f"Database Connection Error: {e}. Please check settings or server status.")
+        return None # Return None if connection fails
+
+# --- Attempt to establish DB connection when app loads/script runs ---
+# This will now use the cached function.
+# The connection logic inside get_db_connection() will only run once
+# per session unless the cache is invalidated.
+initial_conn_on_load = get_db_connection()
+
+# ... (PROMPT_TEMPLATES, etc.) ...
+
 def save_conversation_data():
     """
-    Saves the current conversation data from st.session_state to a PostgreSQL database.
+    Saves the current conversation data from st.session_state to a PostgreSQL database
+    using a cached connection.
     """
     if "messages" not in st.session_state or not st.session_state.messages:
         print("No messages to save.")
         st.toast("No messages to save.", icon="🤷")
         return
 
-    conn = None
+    # Get the cached database connection
+    conn = get_db_connection() # This will return the cached connection object
+
+    if conn is None or conn.closed: # Check if connection is valid
+        st.error("Cannot save data: Database connection is not available or closed.")
+        print("Save operation failed: Database connection is None or closed.")
+        if conn is None and initial_conn_on_load is None: # if it never connected
+             print("The initial connection attempt also failed.")
+        elif conn and conn.closed: # if it was connected but now closed
+             print("The previously cached connection is now closed. Consider refreshing the page to re-initialize.")
+             # For more advanced handling, you might try to clear the cache and retry:
+             # st.cache_resource.clear()
+             # conn = get_db_connection()
+             # if conn is None or conn.closed:
+             #    st.error("Still no valid DB connection after cache clear attempt.")
+             #    return
+        return
+
     cur = None
-
     try:
-        # Establish connection to PostgreSQL
-        conn = psycopg2.connect(
-            dbname=DB_NAME,
-            user=DB_USER,
-            password=DB_PASSWORD,
-            host=DB_HOST,
-            port=DB_PORT
-        )
         cur = conn.cursor()
+        print(f"Saving conversation data. DB Connection active: {not conn.closed}")
 
-        # Retrieve conversation metadata from session_state
-        # Use Python's time for timestamp consistency, or rely on DB's DEFAULT CURRENT_TIMESTAMP
-        conversation_timestamp = time.strftime("%Y-%m-%d %H:%M:%S %z") # Format suitable for TIMESTAMPTZ
+        now_local_aware = datetime.datetime.now(datetime.timezone.utc).astimezone()
+        conversation_timestamp_str = now_local_aware.isoformat(sep=' ', timespec='seconds')
+        
         language = st.session_state.get("language", "N/A")
-        user_role = st.session_state.get("role", "N/A") # Renamed to avoid conflict with message role
+        user_role = st.session_state.get("role", "N/A")
         address = st.session_state.get("address", "N/A")
         contact_details = st.session_state.get("contact_details", "N/A")
 
-        # Insert into 'conversations' table
         insert_conversation_query = """
         INSERT INTO conversations (timestamp, language, role, address, contact_details)
         VALUES (%s, %s, %s, %s, %s)
         RETURNING id;
         """
         cur.execute(insert_conversation_query, (
-            conversation_timestamp, language, user_role, address, contact_details
+            conversation_timestamp_str, language, user_role, address, contact_details
         ))
-        conversation_id = cur.fetchone()[0] # Get the ID of the newly inserted conversation
+        conversation_id = cur.fetchone()[0]
 
-        # Insert into 'messages' table
         messages_to_save = st.session_state.get("messages", [])
         insert_message_query = """
         INSERT INTO messages (conversation_id, role, content, message_timestamp)
@@ -79,34 +122,38 @@ def save_conversation_data():
         for message in messages_to_save:
             message_role = message.get("role")
             message_content = message.get("content")
-            # Using current time for each message, or you could add a timestamp to each message dict when created
-            message_instance_timestamp = time.strftime("%Y-%m-%d %H:%M:%S %z")
+            msg_now_local_aware = datetime.datetime.now(datetime.timezone.utc).astimezone()
+            message_instance_timestamp_str = msg_now_local_aware.isoformat(sep=' ', timespec='seconds')
             
             cur.execute(insert_message_query, (
                 conversation_id,
                 message_role,
                 message_content,
-                message_instance_timestamp
+                message_instance_timestamp_str
             ))
 
-        conn.commit() # Commit the transaction
+        conn.commit()
         print(f"Conversation data (ID: {conversation_id}) saved to PostgreSQL database.")
         st.toast(f"Conversation data saved to database.", icon="💾")
 
     except psycopg2.Error as e:
-        print(f"Database error saving conversation data: {e}")
+        print(f"Database error during save operation: {e}")
         st.error(f"Could not save conversation data to database: {e}")
-        if conn:
-            conn.rollback() # Rollback transaction on error
+        if conn and not conn.closed:
+            try:
+                print("Attempting to rollback transaction...")
+                conn.rollback()
+            except psycopg2.Error as rb_e:
+                print(f"Rollback failed: {rb_e}")
     except Exception as e:
         print(f"An unexpected error occurred while saving conversation data: {e}")
         st.error(f"An unexpected error occurred: {e}")
     finally:
         if cur:
             cur.close()
-        if conn:
-            conn.close()
-
+        # We DO NOT close the connection `conn` here.
+        # @st.cache_resource manages its lifecycle (implicitly, no explicit close needed here
+        # unless you define a cleanup function for @st.cach
 
 # --- Assume PROMPT_TEMPLATES and page setup code from above exists ---
 
