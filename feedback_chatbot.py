@@ -67,7 +67,7 @@ if st.session_state.page == "form":
     st.header('Please select your preferences')
     language = st.selectbox(
         'Which language would you like to communicate in?',
-        options=["English", "French", "Spanish", "Hindi"] + sorted(["Mandarin Chinese",  "German",
+        options=["English", "French", "Spanish", "Hindi", "Mandarin"] + sorted(["Mandarin Chinese",  "German",
                 "Russian", "Arabic", "Italian", "Korean", "Punjabi", "Bengali",
                 "Portuguese", "Indonesian", "Urdu", "Persian (Farsi)", "Vietnamese",
                 "Polish", "Samoan", "Thai", "Ukrainian", "Turkish", "Norwegian", "Dutch",
@@ -78,7 +78,7 @@ if st.session_state.page == "form":
                 "Luxembourgish", "Occitan", "Welsh", "Albanian", "Macedonian", "Icelandic",
                 "Slovenian", "Galician", "Basque", "Azerbaijani", "Uzbek", "Kazakh",
                 "Mongolian", "Lao", "Telugu", "Marathi", "Chichewa", "Esperanto",
-                "Tajik", "Yiddish", "Zulu", "Sundanese", "Tatar", "Tswana"
+                "Tajik", "Yiddish", "Zulu", "Sundanese", "Tatar", "Tswana", "French", "Spanish", "Hindi"
             ])
     )
     role = st.radio(
@@ -192,7 +192,7 @@ elif st.session_state.page == "chat":
                         "Luxembourgish", "Occitan", "Welsh", "Albanian", "Macedonian", "Icelandic",
                         "Slovenian", "Galician", "Basque", "Azerbaijani", "Uzbek", "Kazakh",
                         "Mongolian", "Lao", "Telugu", "Marathi", "Chichewa", "Esperanto",
-                        "Tajik", "Yiddish", "Zulu", "Sundanese", "Tatar", "Tswana"
+                        "Tajik", "Yiddish", "Zulu", "Sundanese", "Tatar", "Tswana", "French", "Spanish", "Hindi"
                     ]))), 
                 on_change = self.change_language(chain),
             )
