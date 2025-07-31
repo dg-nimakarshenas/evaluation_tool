@@ -3,7 +3,7 @@ from numpy import nan
 import numpy as np
 
 og_data = pd.read_excel("data\\shdf_property_summaries_with_llm.xlsx")
-new_llm_data = pd.read_excel("data\\shdf_property_summaries_with_llm_2.xlsx")
+#new_llm_data = pd.read_excel("data\\shdf_property_summaries_with_llm_2.xlsx")
 #rasheed_data = pd.read_excel("data\\Evaluation_Framework DG Cities New.xlsx", sheet_name="MeasuresCompletion")
 llm_anaysis_column_names = [
     "repair_history",
@@ -26,7 +26,7 @@ llm_anaysis_column_names = [
     "summary",
     "uprn"
 ]
-final_df = pd.merge(og_data, new_llm_data[llm_anaysis_column_names], on="uprn", how="left")
+#final_df = pd.merge(og_data, new_llm_data[llm_anaysis_column_names], on="uprn", how="left")
 #priorities = pd.read_excel("data\\shdf_priorities.xlsx")
 
 #final_df = pd.merge(priorities, og_data[column_names], on="uprn", how="left")
@@ -38,6 +38,17 @@ final_df = pd.merge(og_data, new_llm_data[llm_anaysis_column_names], on="uprn", 
 # og_data.loc[og_data["sap_difference"].notnull(), "sap_difference"] = (
 #     og_data.loc[og_data["sap_difference"].notnull(), "sap_difference"] - pre_sap_scores[og_data["sap_difference"].notnull()]
 # )
+
+# Calculate 'Cost per SAP score improvement'
+og_data['Cost per SAP score improvement per measure'] = (
+    og_data['Average Cost per measure'] / og_data['sap_difference']
+).replace([np.inf, -np.inf], nan).replace(0, nan)
+
+og_data['Cost per SAP score improvement'] = (
+    og_data['Total Order Value'] / og_data['sap_difference']
+).replace([np.inf, -np.inf], nan).replace(0, nan)
+
+
 completion_columns = [
     'EWI  completion (date)',
     'CWI completion (date)',
@@ -116,38 +127,38 @@ abbreviations = {
 # for col in time_columns:
 #     og_data[col] = og_data[col].where(og_data[col].notna(), nan)
 
-work_columns = [
-    'ewi_completed',
-    'cwi_completed',
-    'loft_insulation_completed',
-    'windows_installation_completed',
-    'doors_installation_completed',
-    'ventilation_(dmev)_completed'
-]
+# work_columns = [
+#     'ewi_completed',
+#     'cwi_completed',
+#     'loft_insulation_completed',
+#     'windows_installation_completed',
+#     'doors_installation_completed',
+#     'ventilation_(dmev)_completed'
+# ]
 
-# Ensure all work columns exist in the DataFrame and are of boolean type.
-# This loop will convert 'True'/'False' strings to actual booleans if needed.
-for col in work_columns:
-    if col in og_data.columns:
-        # This handles cases where the column might be object type (e.g., strings 'True'/'False')
-        if og_data[col].dtype == 'object':
-            og_data[col] = og_data[col].str.lower().eq('true')
-        # Ensure the column is treated as a numeric type for summing (True=1, False=0)
-        og_data[col] = og_data[col].astype(int)
-    else:
-        print(f"Warning: Column '{col}' not found in the DataFrame.")
-
-
-# 2. Add the 'Number of works completed' column.
-# This sums the values (True=1, False=0) across the specified columns for each row.
-og_data['Number of works completed'] = og_data[work_columns].sum(axis=1)
+# # Ensure all work columns exist in the DataFrame and are of boolean type.
+# # This loop will convert 'True'/'False' strings to actual booleans if needed.
+# for col in work_columns:
+#     if col in og_data.columns:
+#         # This handles cases where the column might be object type (e.g., strings 'True'/'False')
+#         if og_data[col].dtype == 'object':
+#             og_data[col] = og_data[col].str.lower().eq('true')
+#         # Ensure the column is treated as a numeric type for summing (True=1, False=0)
+#         og_data[col] = og_data[col].astype(int)
+#     else:
+#         print(f"Warning: Column '{col}' not found in the DataFrame.")
 
 
-# 3. Add the 'Average Cost per measure' column.
-# We divide 'Total Order Value' by 'Number of works completed'.
-# To prevent a DivideByZeroError, we replace any resulting 'inf' or 'NaN' values with 0.
-# This happens when 'Number of works completed' is 0.
-og_data['Average Cost per measure'] = (og_data['Total Order Value'] / og_data['Number of works completed']).replace([np.inf, -np.inf], 0).fillna(0)
+# # 2. Add the 'Number of works completed' column.
+# # This sums the values (True=1, False=0) across the specified columns for each row.
+# og_data['Number of works completed'] = og_data[work_columns].sum(axis=1)
+
+
+# # 3. Add the 'Average Cost per measure' column.
+# # We divide 'Total Order Value' by 'Number of works completed'.
+# # To prevent a DivideByZeroError, we replace any resulting 'inf' or 'NaN' values with 0.
+# # This happens when 'Number of works completed' is 0.
+# og_data['Average Cost per measure'] = (og_data['Total Order Value'] / og_data['Number of works completed']).replace([np.inf, -np.inf], 0).fillna(0)
 
 
 final_df = og_data.copy()

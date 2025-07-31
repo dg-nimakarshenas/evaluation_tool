@@ -694,6 +694,13 @@ elif st.session_state.page == "chat":
                  st.error("Failed to initialize or retrieve conversation chain.")
                  st.stop()
 
+            current_language = st.session_state.language
+            if current_language not in LANGUAGE_OPTIONS:
+                print(f"Warning: Current language '{current_language}' not in options. Defaulting to English.")
+                st.session_state.language = "English"
+                current_language = "English"
+                st.rerun()
+                
             # --- Language Selection ---
             st.selectbox(
                 key='language',
@@ -702,13 +709,6 @@ elif st.session_state.page == "chat":
                 index=LANGUAGE_OPTIONS.index(st.session_state.language),
                 on_change=self.change_language_callback
             )
-
-            current_language = st.session_state.language
-            if current_language not in LANGUAGE_OPTIONS:
-                print(f"Warning: Current language '{current_language}' not in options. Defaulting to English.")
-                st.session_state.language = "English"
-                current_language = "English"
-                st.rerun()
 
             # --- Save Conversation Button ---
             if st.button(self.end_conversation_text, key="end_conversation_button"): # Use translated text
