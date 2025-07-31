@@ -7,7 +7,7 @@ from tqdm import tqdm # Using tqdm for a user-friendly progress bar
 
 
 # --- Configuration ---
-PROPERTIES_FILE_PATH = 'data\\wates_tracker_shdf.xlsx'
+PROPERTIES_FILE_PATH = 'data\\shdf_property_summaries_with_llm.xlsx'
 REPAIRS_FILE_PATH = 'data\\shdf_repairs_data.xlsx'
 COMMON_KEY = 'uprn'
 OUTPUT_FILE_PATH = 'data\\shdf_property_summaries_with_llm_2.xlsx'
@@ -258,7 +258,7 @@ def get_retrofit_assessment(property_history: str, client: OpenAI) -> RetrofitAs
             {
                 "role": "system",
                 "content": "You are an expert in building maintenance. Your task is to assess retrofit effectiveness by analyzing repair histories. Based on the text, categorize repairs into 'damp & mould', 'windows & doors', 'leaks', and 'structural'. "
-                "For each category, assess the severity and frequency of issues before and after the retrofit on a scale of 1 to 5. Base your judgment solely on the provided text. If a category has no repairs, rate its frequency as 1 and severity as 1."
+                "For each category, assess the severity and frequency of issues before and after the retrofit on a scale of 1 to 5. Base your judgment solely on the provided text. If a category has no repairs for a particular repair category, rate its frequency as 0 and severity as 0."
                 "Also, provide a detailed summary of the property's repair history and assessment before and after the retrofit works in a detailed paragraph, this should include how occurances "
                 "for each repair type may have changed, and the causes of the issues, if the information is present in the repair description, these descriptions will "
                 "later be used by a housing expert to assess the impact of the works done in the property so make sure detail is kept regarding each repair type, include this in the 'summary' field in the required schmema."
@@ -334,7 +334,8 @@ def assess_sharing_cities(properties_df: pd.DataFrame, repairs_df: pd.DataFrame,
 
 def create_shdf_prompt_and_cutoffs(property_row: pd.Series, all_repairs_df: pd.DataFrame) -> str:
     """
-    Creates a detailed prompt for the LLM including dynamic, per-category cut-off dates.
+    Creates a detailed prompt for the LLM including dynamic, per-category cut-off dates,
+    taking only the first repair description per day.
     """
     prop_id = property_row['uprn']
     property_repairs = all_repairs_df[all_repairs_df['nlpg_uprn_(move_to_end)'] == prop_id]
@@ -362,9 +363,20 @@ def create_shdf_prompt_and_cutoffs(property_row: pd.Series, all_repairs_df: pd.D
         valid_repairs = property_repairs[pd.notna(property_repairs['17_issued_date'])].copy()
 
         if not valid_repairs.empty:
-            repair_texts = valid_repairs.apply(
+            # --- MODIFICATION START ---
+            # Ensure the date column is datetime and sort chronologically
+            valid_repairs.loc[:, '17_issued_date'] = pd.to_datetime(valid_repairs['17_issued_date'])
+            valid_repairs = valid_repairs.sort_values(by='17_issued_date', ascending=True)
+
+            # Group by the calendar date and take the first entry for each day.
+            # This handles cases where multiple repairs were logged on the same day.
+            unique_day_repairs = valid_repairs.groupby(valid_repairs['17_issued_date'].dt.date).first()
+            
+            # Format the unique repairs into the desired string format
+            repair_texts = unique_day_repairs.apply(
                 lambda row: f"({row['17_issued_date'].date()}) {row['13_works_order_description']}", axis=1
             ).tolist()
+            # --- MODIFICATION END ---
             repair_section = "; ".join(repair_texts)
         else:
             repair_section = "No repairs with valid dates on record."
@@ -392,7 +404,8 @@ def get_shdf_retrofit_assessment(prompt: str, client) -> RetrofitAssessment:
       For each category, you must assess the severity and frequency of issues 'before' and 'after' its specific cut-off date. 
       #Key Rules:
       1. leave the 'after' field empty ONLY IF the cut-off date is 'Not Applicable' for that category, otherwise, default the 'after' severity and frequency to 1.
-      2. If a category has no recorded repairs for the particular, rate its frequency as 0 and severity as 0, DO NOT leave it empty.
+      2. If a category has no recorded repairs for the particular repair type before or after the cut off point, rate its frequency as 0 and severity as 0, DO NOT leave it empty. 
+      3. PLEASE put the frequency and severity as 0 if there are no recorded issues for that category.
       The Schema for the response is as follows:\n
     ```json {RetrofitAssessment.model_json_schema()}"""
 
@@ -804,5 +817,5 @@ def main():
 if __name__ == "__main__":
     #main()
     #generate_sharing_cities_summaries()
-    #generate_shdf_summaries()
-    run_wates_analysis()
+    generate_shdf_summaries()
+    #run_wates_analysis()

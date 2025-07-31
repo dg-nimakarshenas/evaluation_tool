@@ -3,6 +3,7 @@ from numpy import nan
 import numpy as np
 
 og_data = pd.read_excel("data\\shdf_property_summaries_with_llm.xlsx")
+new_llm_data = pd.read_excel("data\\shdf_property_summaries_with_llm_2.xlsx")
 #rasheed_data = pd.read_excel("data\\Evaluation_Framework DG Cities New.xlsx", sheet_name="MeasuresCompletion")
 llm_anaysis_column_names = [
     "repair_history",
@@ -23,12 +24,9 @@ llm_anaysis_column_names = [
     "structural_after_severity",
     "structural_after_frequency",
     "summary",
-    "Total Order Value",
-    "health_status_before",
-    "health_status_after",
-    "Measures",
     "uprn"
 ]
+final_df = pd.merge(og_data, new_llm_data[llm_anaysis_column_names], on="uprn", how="left")
 #priorities = pd.read_excel("data\\shdf_priorities.xlsx")
 
 #final_df = pd.merge(priorities, og_data[column_names], on="uprn", how="left")

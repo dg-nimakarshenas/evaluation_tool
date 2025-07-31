@@ -25,11 +25,11 @@ from datetime import datetime, timedelta
 today = datetime.now().strftime("%d %B %Y")
 # --- Database Configuration ---
 # IMPORTANT: Replace these with your actual PostgreSQL connection details
-DB_NAME = os.getenv("DB_NAME", "feedback_db")
-DB_USER = os.getenv("DB_USER", "nimakarshenas-dgcities")
+DB_NAME = os.getenv("DB_NAME", "postgres")
+DB_USER = os.getenv("DB_USER", "postgres.oedyrmoxycaidzifeucl")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "4Abetterfuture!")
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = os.getenv("DB_PORT", "5432")
+DB_HOST = os.getenv("DB_HOST", "aws-0-eu-west-2.pooler.supabase.com")
+DB_PORT = os.getenv("DB_PORT", "6543")
 
 # --- Database Connection Function with Streamlit Caching ---
 @st.cache_resource  # This decorator does the magic!
@@ -64,7 +64,57 @@ def get_db_connection():
 # per session unless the cache is invalidated.
 initial_conn_on_load = get_db_connection()
 
-# ... (PROMPT_TEMPLATES, etc.) ...
+@st.cache_resource
+def get_llm_for_translation():
+    """
+    Initializes and caches a ChatOpenAI model instance specifically for UI translation.
+    This prevents re-initializing the model on every text translation.
+    """
+    print("Initializing LLM for UI translation (cached)...")
+    try:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            st.error("OPENAI_API_KEY is not set. Translation services will not be available.")
+            return None
+        return ChatOpenAI(
+            model_name="gpt-4.1-nano-2025-04-14",
+            temperature=0,
+            api_key=api_key
+        )
+    except Exception as e:
+        print(f"Failed to initialize translation LLM: {e}")
+        st.error(f"Could not initialize translation service: {e}")
+        return None
+
+def translate_text(text_to_translate, target_language, llm):
+    """
+    Global function to translate a given piece of text to a target language using the provided LLM.
+    """
+    if not llm or not text_to_translate or target_language == "English":
+        return text_to_translate
+    
+    # Use a session state cache to avoid re-translating the same text in the same session
+    if "ui_translation_cache" not in st.session_state:
+        st.session_state.ui_translation_cache = {}
+    
+    cache_key = f"{target_language}|{text_to_translate}"
+    if cache_key in st.session_state.ui_translation_cache:
+        return st.session_state.ui_translation_cache[cache_key]
+
+    print(f"Translating to {target_language}: '{text_to_translate[:50]}...'")
+    try:
+        translate_prompt = ChatPromptTemplate.from_messages([
+            ("system", PROMPT_TEMPLATES["translator"]),
+            ("human", f"Translate the following text into {target_language}:\n\n{text_to_translate}")
+        ])
+        response = llm.invoke(translate_prompt.format_prompt(text=text_to_translate).to_messages())
+        translated_text = response.content
+        st.session_state.ui_translation_cache[cache_key] = translated_text # Cache the result
+        return translated_text
+    except Exception as e:
+        print(f"Error during translation: {e}")
+        # Do not cache failures
+        return text_to_translate
 
 def save_conversation_data():
     """
@@ -170,9 +220,10 @@ with on‑site care, social rent, and shared communal spaces).
 Your single goal is to **listen and gently explore** the resident’s views,
 needs, hopes and concerns—never to give advice or make promises.  
 Start with a warm, open‑ended question that invites them to talk about their
-current living situation, then follow the structure below, adapting naturally
-to what the resident has already shared. Always put the resident at ease,
-using clear, jargon‑free language.
+current living situation, then try to follow the structure below, adapting naturally
+to what the resident has already shared. Try and explore what the resident is saying, not only jumping 
+to the next question in the provided structure. Always put the resident at ease, using clear, 
+jargon‑free language.
 
 
 ##CONVERSATION STRUCTURE & TARGET QUESTIONS
@@ -270,12 +321,59 @@ Example questions:
 
 # Initialize page state
 if "page" not in st.session_state:
-    st.session_state.page = "form"
+    st.session_state.page = "language_selection"
+
+# --- Language and Role Options ---
+# Defined globally to be accessible on multiple pages
+LANGUAGE_OPTIONS = ["English", "French (Français)", "Spanish (Español)", "Hindi (हिन्दी)"] + sorted([
+    "Albanian (Shqip)", "Amharic (አማርኛ)", "Arabic (العربية)", "Armenian (Հայերեն)",
+    "Bengali (বাংলা)", "Bosnian (Bosanski)", "Bulgarian (Български)", "Burmese (မြန်မာဘာသာ)",
+    "Croatian (Hrvatski)", "Czech (Čeština)", "Danish (Dansk)", "Dutch (Nederlands)",
+    "English", "Estonian (Eesti)", "Finnish (Suomi)", "French (Français)", "Georgian (ქართული)",
+    "German (Deutsch)", "Greek (Ελληνικά)", "Gujarati (ગુજરાતી)", "Hindi (हिन्दी)",  "Hungarian (Magyar)",
+    "Icelandic (Íslenska)", "Indonesian (Bahasa Indonesia)", "Italian (Italiano)", "Japanese (日本語)",
+    "Kannada (ಕನ್ನಡ)", "Kazakh (Қазақ тілі)", "Korean (한국어)", "Latvian (Latviešu)", "Lithuanian (Lietuvių)",
+    "Macedonian (Македонски)", "Malay (Bahasa Melayu)", "Malayalam (മലയാളം)", "Maltese (Malti)",
+    "Mandarin Chinese (普通话)", "Marathi (मराठी)", "Nepali (नेपाली)", "Norwegian (Norsk)", "Pashto (پښتو)",
+    "Persian (Farsi) (فارسی)", "Polish (Polski)", "Portuguese (Português)", "Punjabi (ਪੰਜਾਬੀ)", "Romanian (Română)",
+    "Russian (Русский)", "Serbian (Српски)", "Sinhala (සිංහල)", "Slovak (Slovenčina)", "Slovenian (Slovenščina)",
+    "Somali (Soomaali)",  "Spanish (Español)", "Swahili (Kiswahili)","Swedish (Svenska)", "Tagalog (Tagalog)",
+    "Tamil (தமிழ்)", "Telugu (తెలుగు)", "Thai (ภาษาไทย)", "Turkish (Türkçe)", "Ukrainian (Українська)",
+    "Urdu (اردو)",  "Uzbek (Oʻzbekcha)", "Vietnamese (Tiếng Việt)"])
+
+if st.session_state.page == "language_selection":
+    st.title("Welcome / Bienvenue / Bienvenido / स्वागत है")
+    st.header("Please Select Your Language")
+
+    # Clean up any previous session data if user lands here
+    keys_to_clear = ["messages", "chain", "language", "role", "address", "contact_details"]
+    for key in keys_to_clear:
+        st.session_state.pop(key, None)
+
+    selected_language = st.selectbox(
+        label="Choose your preferred language to continue:",
+        options=LANGUAGE_OPTIONS,
+        index=0
+    )
+
+    if st.button("Confirm and Continue"):
+        st.session_state.language = selected_language
+        st.session_state.page = "form"
+        st.rerun()
 
 # --- Setup form ---
-if st.session_state.page == "form":
-    st.title('Welcome to the Extra Care Feedback Chatbot!')
-    st.write("""Welcome 🙂
+elif st.session_state.page == "form":
+    # Get the LLM for translation. This will hit the cache after the first run.
+    translation_llm = get_llm_for_translation()
+    lang = st.session_state.get("language", "English")
+
+    # Helper to translate text, showing a spinner for the first translation batch
+    @st.cache_data(show_spinner=f"Preparing form in {lang}...")
+    def get_translated_ui_texts(_lang):
+        # This function runs once per language and caches the results
+        ui_elements = {
+            "form_title": "Welcome to the Extra Care Feedback Chatbot!",
+            "welcome_message": """Welcome 🙂
 Thank you for taking a moment to share your thoughts with us.
 We’re exploring Extra Care Housing – self‑contained flats for older residents that include on‑site care and friendly communal spaces to help you stay independent.
 
@@ -284,9 +382,32 @@ Your feedback will guide the Royal Borough of Greenwich as we shape future
 There are no right or wrong answers – every comment counts.
 
 Please complete the short form below to get started, and then we’ll chat at your own pace.
-We appreciate your time and insights!""")
+We appreciate your time and insights!""",
+            "form_header": "Please fill out the form below to get started.",
+            "details_subheader": "Your Details",
+            "address_label": "Your Address (Required)",
+            "contact_label": "Your Contact Details (e.g., email or phone - Optional)",
+            "chat_prefs_subheader": "Chat Preferences",
+            "language_label": "Which language would you like to communicate in?",
+            "role_label": "Are you a resident or a contractor?",
+            "submit_button": "Submit and Start Chat",
+            "address_error": "Address is required. Please enter your address."
+        }
+        
+        if _lang == "English":
+            return ui_elements
+            
+        translated_texts = {}
+        for key, text in ui_elements.items():
+            translated_texts[key] = translate_text(text, _lang, translation_llm)
+        return translated_texts
+
+    T = get_translated_ui_texts(lang)
+
+    st.title(T["form_title"])
+    st.write(T["welcome_message"])
     
-    # --- Safeguard: Save pending conversation if navigating back to form with history ---
+    # Safeguard logic remains the same...
     if "messages" in st.session_state and st.session_state.messages:
         if not st.session_state.get("conversation_saved_on_form_load_safeguard", False):
             print("Form page loaded with existing messages. Safeguard: Saving conversation...")
@@ -295,69 +416,30 @@ We appreciate your time and insights!""")
     else:
         st.session_state.pop("conversation_saved_on_form_load_safeguard", None)
 
-    st.header('Please fill out the form below to get started.')
+    st.header(T["form_header"])
     with st.form(key="user_details_form"):
-        st.subheader("Your Details")
-        # Use session state to prefill if available, for user convenience
+        st.subheader(T["details_subheader"])
         address_val = st.session_state.get("address", "")
         contact_val = st.session_state.get("contact_details", "")
         
-        form_address = st.text_input("Your Address (Required)", value=address_val)
-        form_contact_details = st.text_input("Your Contact Details (e.g., email or phone - Optional)", value=contact_val)
-
-        st.subheader("Chat Preferences")
-        language_options = ["English", "French", "Spanish", "Hindi"] + sorted([
-            "Mandarin Chinese", "German", "Russian", "Arabic", "Italian", "Korean", "Punjabi", "Bengali",
-            "Portuguese", "Indonesian", "Urdu", "Persian (Farsi)", "Vietnamese", "Polish", "Samoan",
-            "Thai", "Ukrainian", "Turkish", "Norwegian", "Dutch", "Greek", "Romanian", "Swahili",
-            "Hungarian", "Hebrew", "Swedish", "Czech", "Finnish", "Tagalog", "Burmese", "Tamil",
-            "Kannada", "Pashto", "Yoruba", "Malay", "Haitian Creole", "Nepali", "Sinhala", "Catalan",
-            "Malagasy", "Latvian", "Lithuanian", "Estonian", "Somali", "Maltese", "Corsican",
-            "Luxembourgish", "Occitan", "Welsh", "Albanian", "Macedonian", "Icelandic", "Slovenian",
-            "Galician", "Basque", "Azerbaijani", "Uzbek", "Kazakh", "Mongolian", "Lao", "Telugu",
-            "Marathi", "Chichewa", "Esperanto", "Tajik", "Yiddish", "Zulu", "Sundanese", "Tatar", "Tswana"
-        ])
-        # Pre-select language and role if they exist in session_state
-        lang_idx = 0
-        if "language" in st.session_state and st.session_state.language in language_options:
-            lang_idx = language_options.index(st.session_state.language)
+        form_address = st.text_input(T["address_label"], value=address_val)
+        form_contact_details = st.text_input(T["contact_label"], value=contact_val)
         
-        role_options = ['Resident', 'Contractor']
         role_idx = 0
-        if "role" in st.session_state and st.session_state.role in role_options:
-            role_idx = role_options.index(st.session_state.role)
-
-        form_language = st.selectbox(
-            'Which language would you like to communicate in?',
-            options=language_options,
-            index=lang_idx, # Pre-select based on session state
-            key='selected_language_form' 
-        )
-        form_role = st.radio(
-            'Are you a resident or a contractor?',
-            options=role_options,
-            index=role_idx, # Pre-select based on session state
-            key='selected_role_form' 
-        )
-        submit_button = st.form_submit_button('Submit and Start Chat')
+        submit_button = st.form_submit_button(T["submit_button"])
 
     if submit_button:
-        if not form_address: # Check the form's address field
-            st.error("Address is required. Please enter your address.")
+        if not form_address:
+            st.error(T["address_error"])
         else:
             st.session_state.address = form_address
             st.session_state.contact_details = form_contact_details
-            st.session_state.language = form_language # Use form_language
-            st.session_state.role = form_role # Use form_role
+            st.session_state.role = "resident"
             
-            # Clear ALL chat-related state when submitting the form to start fresh
-            st.session_state.pop("messages", None)
-            st.session_state.pop("chain", None)
-            st.session_state.pop("initial_message_sent", None)
-            st.session_state.pop("current_page", None) 
-            st.session_state.pop("display_translated_message", None)
-            st.session_state.pop("last_interaction_time", None) # Clear timer
-            st.session_state.pop("conversation_saved_on_form_load_safeguard", None) # Reset safeguard flag
+            # Clear chat state and proceed
+            keys_to_pop = ["messages", "chain", "initial_message_sent", "last_interaction_time"]
+            for key in keys_to_pop:
+                st.session_state.pop(key, None)
 
             st.session_state.page = "chat"
             st.rerun()
@@ -389,14 +471,44 @@ elif st.session_state.page == "chat":
                 st.toast("Session ended due to inactivity. Data saved. Returning to form.", icon="⏱️")
                 st.rerun()
     
-    st.title('SHDF Feedback Chatbot')
-    # Display selected role and language if they exist
-    if "role" in st.session_state:
-        st.write(f"**Role:** {st.session_state.role}")
-    if "language" in st.session_state:
-        st.write(f"**Language:** {st.session_state.language}")
-    st.session_state.current_language = st.session_state.language
+    translation_llm = get_llm_for_translation()
+    lang = st.session_state.get("language", "English")
 
+    @st.cache_data(show_spinner=f"Preparing chat in {lang}...")
+    def get_chat_ui_translations(_lang):
+        ui = {
+            "chat_title": "Extra Care Feedback Chatbot",
+            "role_label": "Role",
+            "language_label": "Language",
+            "change_lang_label": "You can change the language here:",
+            "end_button": "End Conversation and Save",
+            "ending_toast": "Ending conversation and saving data...",
+            "ended_toast": "Conversation ended and saved. Returning to form.",
+            "back_to_form_button": "Back to Form",
+            "timeout_warning": f"Session timed out due to inactivity for over {int(CHAT_TIMEOUT_SECONDS/60)} minutes. Saving conversation...",
+            "timeout_toast": "Session ended due to inactivity. Data saved. Returning to form.",
+            "audio_prompt": "You can also record a voice message. Press the microphone, record, and then press 'Send Audio'.",
+            "send_audio_button": "Send Audio",
+            "chat_placeholder": "Write your message here...",
+            "transcribing_audio": "Transcribing audio...",
+        }
+        if _lang == "English": return ui
+        return {k: translate_text(v, _lang, translation_llm) for k, v in ui.items()}
+
+    T_CHAT = get_chat_ui_translations(lang)
+
+    # Update timeout messages with translated text
+    if "last_interaction_time" in st.session_state:
+        # ... (timeout logic)
+        if time_since_last_interaction > CHAT_TIMEOUT_SECONDS:
+            st.warning(T_CHAT["timeout_warning"])
+            # ... (rest of timeout logic)
+            st.toast(T_CHAT["timeout_toast"], icon="⏱️")
+            st.rerun()
+    
+    st.title(T_CHAT["chat_title"])
+    if "language" in st.session_state:
+        st.write(f"**{T_CHAT['language_label']}:** {st.session_state.language}")
 
     # --- Helper Functions and Classes ---
 
@@ -451,57 +563,17 @@ elif st.session_state.page == "chat":
         def on_llm_end(self, response, **kwargs):
              self.container.markdown(self.text)
 
-
-    # Main Chatbot Class
     class ContextChatbot:
         def __init__(self):
             self.audio_llm, self.llm = configure_llm()
-            api_key = os.getenv("OPENAI_API_KEY")
+            self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY")) if os.getenv("OPENAI_API_KEY") else None
+            
             self.base_chat_input_placeholder = "Write your message here..."
             self.base_upload_button_text = "Send Audio"
             self.base_end_conversation_text = "End Conversation and Save"
-            self.chat_input_placeholder = self.base_chat_input_placeholder
-            self.upload_button_text = self.base_upload_button_text
-            self.end_conversation_text = self.base_end_conversation_text # Initialize new button text
-
-            if st.session_state.language != "English":
-                translated_placeholder = self.translate_text(self.base_chat_input_placeholder, st.session_state.language)
-                if translated_placeholder: self.chat_input_placeholder = translated_placeholder
-
-                translated_button_text = self.translate_text(self.base_upload_button_text, st.session_state.language)
-                if translated_button_text: self.upload_button_text = translated_button_text
-
-                translated_end_text = self.translate_text(self.base_end_conversation_text, st.session_state.language) # Translate new button text
-                if translated_end_text: self.end_conversation_text = translated_end_text
-
-            if not api_key: # Should have been caught by configure_llm
-                self.client = None
-            else:
-                try:
-                    self.client = OpenAI(api_key=api_key) # self.client from original code
-                except Exception as e:
-                    st.error(f"Failed to initialize OpenAI client: {e}")
-                    self.client = None
-
-
-        # Helper function for simple translation
-        def translate_text(self, text_to_translate, target_language):
-            if not self.llm or not text_to_translate:
-                return text_to_translate # Return original if no LLM or no text
-            print(f"Attempting to translate to {target_language}: '{text_to_translate[:50]}...'")
-            try:
-                translate_prompt = ChatPromptTemplate.from_messages([
-                    ("system", PROMPT_TEMPLATES["translator"]),
-                    ("human", f"Translate the following text into {target_language}:\n\n{text_to_translate}")
-                ])
-                response = self.llm.invoke(translate_prompt.format_prompt(text=text_to_translate).to_messages())
-                translated_text = response.content
-                print(f"Translation result: '{translated_text[:50]}...'")
-                return translated_text
-            except Exception as e:
-                print(f"Error during translation: {e}")
-                st.warning(f"Could not translate text due to an error: {e}")
-                return text_to_translate
+            self.chat_input_placeholder = T_CHAT["chat_placeholder"]
+            self.upload_button_text = T_CHAT["send_audio_button"]
+            self.end_conversation_text = T_CHAT["end_button"] # Initialize new button text
 
 
         def setup_chain(self):
@@ -569,8 +641,7 @@ elif st.session_state.page == "chat":
                         break
 
             # 2. Update the system prompt in the existing chain object
-            role_key = st.session_state.role.lower()
-            system_template = PROMPT_TEMPLATES.get(role_key, "You are a helpful assistant.")
+            system_template = PROMPT_TEMPLATES.get("resident", "You are a helpful assistant.")
             system_template += f"\n\nYou must communicate ONLY in {new_language}. Ask questions relevant to the SHDF program feedback based on the user's role ({st.session_state.role})."
 
             try:
@@ -593,7 +664,8 @@ elif st.session_state.page == "chat":
                 if last_assistant_message_content:
                     print("Attempting to translate the last assistant message.")
                     with st.spinner(f"Translating last message to {new_language}..."):
-                         translated_content = self.translate_text(last_assistant_message_content, new_language)
+                        # Call the global function
+                        translated_content = translate_text(last_assistant_message_content, new_language, self.llm)
 
                     if translated_content:
                          print("Storing translated message for display.")
@@ -603,10 +675,6 @@ elif st.session_state.page == "chat":
                          print("Translation failed or returned empty.")
                          # Optionally store a fallback message if translation fails
                          # st.session_state.display_translated_message = f"(Could not translate previous message to {new_language})"
-
-                # --- REMOVED direct display from here ---
-                # with st.chat_message("assistant"):
-                #      st.write(translated_content) # REMOVED
 
             except Exception as e:
                 print(f"Error during language change processing: {e}")
@@ -626,36 +694,25 @@ elif st.session_state.page == "chat":
                  st.stop()
 
             # --- Language Selection ---
-            language_options = list(dict.fromkeys([st.session_state.language] + ["English", "French", "Spanish", "Hindi"] + sorted([
-                "Mandarin Chinese", "German", "Russian", "Arabic", "Italian", "Korean", "Punjabi", "Bengali",
-                "Portuguese", "Indonesian", "Urdu", "Persian (Farsi)", "Vietnamese", "Polish", "Samoan",
-                "Thai", "Ukrainian", "Turkish", "Norwegian", "Dutch", "Greek", "Romanian", "Swahili",
-                "Hungarian", "Hebrew", "Swedish", "Czech", "Finnish", "Tagalog", "Burmese", "Tamil",
-                "Kannada", "Pashto", "Yoruba", "Malay", "Haitian Creole", "Nepali", "Sinhala", "Catalan",
-                "Malagasy", "Latvian", "Lithuanian", "Estonian", "Somali", "Maltese", "Corsican",
-                "Luxembourgish", "Occitan", "Welsh", "Albanian", "Macedonian", "Icelandic", "Slovenian",
-                "Galician", "Basque", "Azerbaijani", "Uzbek", "Kazakh", "Mongolian", "Lao", "Telugu",
-                "Marathi", "Chichewa", "Esperanto", "Tajik", "Yiddish", "Zulu", "Sundanese", "Tatar", "Tswana"
-            ])))
+            st.selectbox(
+                key='language',
+                label=T_CHAT['change_lang_label'],
+                options=LANGUAGE_OPTIONS,
+                index=LANGUAGE_OPTIONS.index(st.session_state.language),
+                on_change=self.change_language_callback
+            )
 
             current_language = st.session_state.language
-            if current_language not in language_options:
+            if current_language not in LANGUAGE_OPTIONS:
                 print(f"Warning: Current language '{current_language}' not in options. Defaulting to English.")
                 st.session_state.language = "English"
                 current_language = "English"
                 st.rerun()
 
-            st.selectbox(
-                key='language',
-                label='You can change the language here:',
-                options=language_options,
-                index=language_options.index(current_language),
-                on_change=self.change_language_callback
-            )
             # --- Save Conversation Button ---
             if st.button(self.end_conversation_text, key="end_conversation_button"): # Use translated text
                 # This message will be in English unless translated separately
-                st.info("Ending conversation and saving data...")
+                st.info(T_CHAT["ending_toast"])
                 save_conversation_data()
 
                 # Clear chat-specific state, keep user details for form prefill
@@ -666,7 +723,7 @@ elif st.session_state.page == "chat":
 
                 st.session_state.page = "form"
                 # This toast message will be in English
-                st.toast("Conversation ended and saved. Returning to form.", icon="👋")
+                st.toast(T_CHAT["ended_toast"], icon="👋")
                 st.rerun()
             # --- Initialize Chat History and First Message ---
             if "messages" not in st.session_state:
@@ -723,9 +780,7 @@ elif st.session_state.page == "chat":
             user_query = st.chat_input(placeholder=self.chat_input_placeholder)
 
             # Audio Input (Upload)
-            audio_file = st.audio_input("You can also record a voice message in your preferred language instead of typing! If you'd like to " \
-            "record a voice message, press the 'bin' button to clear the chat history and then press the 'record' button to start recording.")
-
+            audio_file = st.audio_input(T_CHAT['audio_prompt'])
             # --- Process Inputs ---
             processed_input = None # Variable to hold the input to send to the LLM
             send_audio_button = st.button(f"✅ {self.upload_button_text}")
@@ -738,7 +793,7 @@ elif st.session_state.page == "chat":
             
             elif audio_file and send_audio_button:
                 # Read bytes and wrap in Blob
-                st.write("Transcribing...")
+                st.write(T_CHAT['transcribing_audio'])
                 # Treat transcription as user input
                 transcript = self.audio_llm.audio.transcriptions.create(
                                         model="gpt-4o-mini-transcribe",
