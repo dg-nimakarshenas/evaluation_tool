@@ -358,6 +358,7 @@ if st.session_state.page == "language_selection":
 
     if st.button("Confirm and Continue"):
         st.session_state.language = selected_language
+        st.session_state.current_language = selected_language
         st.session_state.page = "form"
         st.rerun()
 
