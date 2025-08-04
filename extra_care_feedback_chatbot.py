@@ -231,9 +231,8 @@ jargon‑free language.
 
 1. **Introduction & Purpose**
 Example introduction:    
-   • Introduce the project, say you're on behalf of the council and explain in a few sentences what Extra Care Housing is.
-   Example:“We’re speaking with older residents in Greenwich to understand what matters most to you when it comes to housing as you get older. 
-   We’re especially looking at Extra Care Housing—homes that support independent living with care available if needed, mainly for social rent.”  
+   • “We’re speaking with older residents in Greenwich to understand what matters most to you when it comes to housing as you get older. 
+      We’re especially looking at Extra Care Housing—homes that support independent living with care available if needed, mainly for social rent.”  
    • Ask: “To get started, could you tell me a little about your current
      home and how long you’ve lived there?”
 
@@ -655,9 +654,9 @@ elif st.session_state.page == "chat":
                      print("System guidance message added to history and memory.")
                 else:
                      print("Warning: chat_memory not found on chain.memory.")
-                self.chat_input_placeholder = self.base_chat_input_placeholder
-                self.upload_button_text = self.base_upload_button_text
-                self.end_conversation_text = self.base_end_conversation_text    
+                self.chat_input_placeholder = translate_text(self.base_chat_input_placeholder, new_language, self.llm)
+                self.upload_button_text = translate_text(self.base_upload_button_text, new_language, self.llm)
+                self.end_conversation_text =  translate_text(self.base_end_conversation_text, new_language, self.llm)    
                 # 4. Translate the last assistant message (if found) and store for later display
                 st.session_state.pop("display_translated_message", None) # Clear any previous pending message
                 if last_assistant_message_content:
