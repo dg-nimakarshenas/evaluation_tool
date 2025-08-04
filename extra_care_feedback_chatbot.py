@@ -701,7 +701,7 @@ elif st.session_state.page == "chat":
             )
 
             # --- Save Conversation Button ---
-            if st.button(self.end_conversation_text, key="end_conversation_button"): # Use translated text
+            if st.button(T_CHAT["end_button"], key="end_conversation_button"): # Use translated text
                 # This message will be in English unless translated separately
                 st.info(T_CHAT["ending_toast"])
                 save_conversation_data()
