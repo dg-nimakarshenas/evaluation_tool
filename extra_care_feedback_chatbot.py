@@ -90,7 +90,7 @@ def translate_text(text_to_translate, target_language, llm):
     """
     Global function to translate a given piece of text to a target language using the provided LLM.
     """
-    if not llm or not text_to_translate or target_language == "English":
+    if not llm or not text_to_translate:
         return text_to_translate
     
     # Use a session state cache to avoid re-translating the same text in the same session
@@ -230,10 +230,8 @@ jargon‑free language.
 (Ask only if relevant and not already answered; feel free to re‑phrase.)
 
 1. **Introduction & Purpose**
-Example introduction:  
-   • Briefly introduce yourself and say you’re on behalf of the Council  
-     to learn what matters most to them about housing as they grow older.  
-   • Explain in a few sentences what Extra Care Housing is.
+Example introduction:    
+   • Introduce the project, say you're on behalf of the council and explain in a few sentences what Extra Care Housing is.
    Example:“We’re speaking with older residents in Greenwich to understand what matters most to you when it comes to housing as you get older. 
    We’re especially looking at Extra Care Housing—homes that support independent living with care available if needed, mainly for social rent.”  
    • Ask: “To get started, could you tell me a little about your current
