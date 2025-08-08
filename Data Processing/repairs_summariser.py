@@ -1,16 +1,17 @@
 import pandas as pd
 import os
 from openai import OpenAI
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Dict
 from pydantic import BaseModel, Field
-from tqdm import tqdm # Using tqdm for a user-friendly progress bar
+from tqdm import tqdm 
+from datetime import datetime
 
 
 # --- Configuration ---
 PROPERTIES_FILE_PATH = 'data\\shdf_property_summaries_with_llm.xlsx'
 REPAIRS_FILE_PATH = 'data\\shdf_repairs_data.xlsx'
 COMMON_KEY = 'uprn'
-OUTPUT_FILE_PATH = 'data\\shdf_property_summaries_with_llm_2.xlsx'
+OUTPUT_FILE_PATH = 'data\\shdf_property_summaries_with_llm.xlsx'
 SHARING_CITIES_COMPLETION_DATES = {
     "ERNEST DENCE ESTATE": pd.to_datetime("2022-05-01"),
     "FLAMSTEAD ESTATE": pd.to_datetime("2022-11-01")
@@ -49,35 +50,72 @@ SHDF_COMPLETION_DICT = {
     ]    
 }
 
-class RepairAssessmentHelper(BaseModel):
+class OverallRepairSummary(BaseModel):
+    """Summary model for overall repair analysis across all categories."""
+    summary: str = Field(
+        description="A comprehensive summary of the property's repair history across all categories (damp, windows/doors, leaks, structural), "
+        "including how each category changed after their respective interventions, overall effectiveness assessment, "
+        "and detailed information that will be used by housing experts to assess the impact of works."
+    )
+
+
+class SHDFRepairAssessment(BaseModel):
+    """Assessment model for a single repair category in one time period."""
+    severity: Optional[float] = Field(
+        description="Overall severity of the issues on a scale from 1 (minor) to 5 (very severe) or 0 if there are NO recorded issues.",
+        le=5, ge=0
+    )
+    frequency: Optional[float] = Field(
+        description="The number of times this issue has occurred in the given list of repairs, or 0 if there are no recorded issues. BEWARE, there is a chance that there are duplicate entries in the repair history so discount those when counting.",
+        ge=0
+    )
+
+class RepairTypeKeyTakeaways(BaseModel):
+    """Key takeaways model for each repair type after retrofit analysis."""
+    damp_mould_takeaway: str = Field(
+        description="Key takeaway for damp and mould issues: summarize the damp/mould problems before and after the retrofit, "
+        "including effectiveness, any remaining issues, and overall trend. Keep to a few bullet points."
+    )
+    windows_doors_takeaway: str = Field(
+        description="Key takeaway for windows and doors issues: summarize the window/door problems before and after the retrofit, "
+        "including effectiveness, any remaining issues, and overall trend. Keep to a few bullet points."
+    )
+    leaks_takeaway: str = Field(
+        description="Key takeaway for leak issues: summarize the leak problems before and after the retrofit, "
+        "including effectiveness, any remaining issues, and overall trend. Keep to a few bullet points."
+    )
+    structural_takeaway: str = Field(
+        description="Key takeaway for structural issues: summarize the structural problems before and after the retrofit, "
+        "including effectiveness, any remaining issues, and overall trend. Keep to a few bullet points. "
+    )
+
+
+class RepairAssessment(BaseModel):
     """Defines the severity and frequency assessment for a repair category."""
     severity: Optional[float] = Field(
         description="Overall severity of the issues on a scale from 1 (minor) to 5 (very severe) or 0 if there are NO recorded issues.",
         le=5, ge=0
     )
     frequency: Optional[float] = Field(
-        description="The number of times this issue has occurred in the given window, or 0 if there are no recorded issues. BEWARE, there is a chance that there are duplicate entries in the repair history so discount those when counting.",
+        description="The number of times this issue has occurred in the given list of repairs, or 0 if there are no recorded issues for the current repair category",
+        ge=0
     )
-
-class RepairAssessment(BaseModel):
-    """Contains the assessment for a property before and after the retrofit. for the current repair category."""
-    before: RepairAssessmentHelper = Field(description="Assessment of the property before retrofit.")
-    after: Optional[RepairAssessmentHelper] = Field(description="Assessment of the property after retrofit. Leave empty if the cut-off date for this category is 'Not Applicable'. If there are no repairs for this specific repair type, default to 0 for both severity and frequency.")
 
 
 class RetrofitAssessment(BaseModel):
     """The final, top-level model for assessing all repair categories."""
     damp: RepairAssessment = Field(description="Assessment of damp & mould issues in the property. For the severity field, an example of a severe case would be a property with "
-    "black mould or mouldy walls in multiple rooms. Low severity would be a single patch of mould in a corner of a room that is easily cleaned up, or no sign of mould at all, default both severity and frequency to 0 if there are no recorded damp or mould related issues."),
+    "black mould or mouldy walls in multiple rooms. Low severity would be a single patch of mould in a corner of a room that is easily cleaned up, or no sign of mould at all, "
+    "default both severity and frequency to 0 if there are no recorded damp or mould related issues. ONLY count it IF it is explicitly mentioned as a mould or damp issue in the repair history."),
     windows_doors: RepairAssessment = Field(description="Assessment of windows and doors in the property. For the severity field, an example of a severe case would be a property with "
-    "broken windows or doors that do not close properly. Low severity would be a property with no issues with windows or doors."), 
-    leaks: RepairAssessment = Field(description="Assessment of leaks in the property. For the severity field, an example of a severe case would be a property with "
-    "severe leaks that cause damage to the property or require significant repairs. Low severity would be a property with no leaks or minor leaks that are easily fixed."),
-    structural: RepairAssessment = Field(description="Assessment of structural issues in the property. For the severity field, an example of a severe case would be a property with " \
-    "significant structural damage that requires major repairs or poses a safety risk. Low severity would be a property with no structural issues or minor issues that do not affect the safety of the property."),
-    summary: str = Field(
-        description="A high-level summary of the property's repair history and assessment before and after the retrofit works, ignoring duplicate entries. "
-    )
+    "broken windows or doors that do not close properly. Low severity would be a property with no issues with windows or doors. ONLY count it IF it is explicitly mentioned as a window "
+    "or door issue in the repair history, IGNORE lost keys or minor issues that do not affect the functionality of the window or door."), 
+    leaks: RepairAssessment = Field(description="Assessment of leaks in the property. For the severity field, an example of a severe case would be a property with "\
+    "severe leaks that cause damage to the property or require significant repairs. Low severity would be a property with no leaks or minor leaks that are easily fixed. " \
+    "ONLY count it IF it is explicitly mentioned as a leak in the repair history. Igore blockages or minor plumbing issues that do not cause leaks."),
+    structural: RepairAssessment = Field(description="Assessment of structural issues in the property. For the severity field, an example of a severe case would be a property with "
+    "significant structural damage that requires major repairs or poses a safety risk. Low severity would be a property with no structural issues or minor issues that do not affect the safety of the property."
+    "ONLY count it IF it is explicitly mentioned as structural or wall damage in the repair history.")
 
 class DampAssessment(BaseModel):
     """Contains the assessment for damp & mould issues in a property."""
@@ -228,282 +266,463 @@ def generate_llm_summaries(histories_df: pd.DataFrame, client: OpenAI) -> pd.Dat
     )
     return histories_df
 
-def create_repair_history_string(property_repairs: pd.DataFrame) -> str:
-    """Splits repairs into before/after lists and formats them into a single string."""
+def create_repair_history_lists(property_repairs: pd.DataFrame) -> tuple[str, str]:
+    """
+    Splits repairs into before/after lists based on the retrofit completion date
+    and formats them into two separate strings.
+    If multiple repairs occur on the same day, only the first one is kept.
+
+    Args:
+        property_repairs: DataFrame of repairs for a single property.
+
+    Returns:
+        A tuple containing two strings: (before_repairs_str, after_repairs_str).
+    """
+    # This assumes SHARING_CITIES_COMPLETION_DATES is a dict mapping 'estate' to a completion date
     estate = property_repairs['estate'].iloc[0]
     completion_date = SHARING_CITIES_COMPLETION_DATES[estate]
 
-    property_repairs['formatted_repair'] = property_repairs.apply(
+    # --- FIX: De-duplicate repairs correctly by date ---
+    # Sort by the full timestamp to ensure we keep the earliest entry of the day, and create a copy to avoid warnings.
+    property_repairs = property_repairs.sort_values('17_issued_date').copy()
+    
+    # Create a temporary column with just the date part for de-duplication.
+    property_repairs['temp_date'] = property_repairs['17_issued_date'].dt.date
+    
+    # Drop duplicates based on the new temporary date column, keeping the first entry.
+    property_repairs_deduped = property_repairs.drop_duplicates(subset='temp_date', keep='first')
+    # --- END FIX ---
+
+    # Format each repair row into a descriptive string using the de-duplicated dataframe
+    property_repairs_deduped['formatted_repair'] = property_repairs_deduped.apply(
         lambda row: f"({row['17_issued_date'].date()}) {row['13_works_order_description']}", axis=1
     )
 
-    before_repairs = property_repairs[property_repairs['17_issued_date'] < completion_date]
-    after_repairs = property_repairs[property_repairs['17_issued_date'] >= completion_date]
+    # Split the de-duplicated DataFrame into 'before' and 'after' based on the completion date
+    before_df = property_repairs_deduped[property_repairs_deduped['17_issued_date'] < completion_date]
+    after_df = property_repairs_deduped[property_repairs_deduped['17_issued_date'] >= completion_date]
 
-    before_str = "; ".join(before_repairs['formatted_repair'].tolist()) if not before_repairs.empty else "None"
-    after_str = "; ".join(after_repairs['formatted_repair'].tolist()) if not after_repairs.empty else "None"
+    # Create semicolon-separated strings, handling cases with no repairs
+    before_str = "; ".join(before_df['formatted_repair'].tolist()) if not before_df.empty else "None"
+    after_str = "; ".join(after_df['formatted_repair'].tolist()) if not after_df.empty else "None"
 
-    return f"REPAIRS BEFORE RETROFIT: [{before_str}]\nREPAIRS AFTER RETROFIT: [{after_str}]"
+    return before_str, after_str
 
-def get_retrofit_assessment(property_history: str, client: OpenAI) -> RetrofitAssessment:
-    """Sends the repair history to the LLM and gets a structured assessment."""
+# --- LLM Interaction Functions ---
+
+def get_repair_assessment(repair_history: str, client) -> RetrofitAssessment:
+    """
+    Sends a single repair history (either before or after) to the LLM for blind assessment.
+
+    Args:
+        repair_history: A string containing a list of repairs for one period.
+        client: The LLM client instance.
+
+    Returns:
+        A RetrofitAssessment object with severity and frequency for each category.
+    """
     if not client:
-        raise ConnectionError("OpenAI client not initialized.")
+        raise ConnectionError("LLM client not initialized.")
+    
+    # If there's no repair history, return a default object with all zeros.
+    if repair_history == "None":
+        return RetrofitAssessment(
+            damp=RepairAssessment(severity=0, frequency=0),
+            windows_doors=RepairAssessment(severity=0, frequency=0),
+            leaks=RepairAssessment(severity=0, frequency=0),
+            structural=RepairAssessment(severity=0, frequency=0)
+        )
 
-    # Call the LLM with the history, asking for a structured response
+    # Call the LLM with the history, asking for a structured response based on the new schema.
+    # Note: The prompt is now simplified to focus only on the provided text, with no "before/after" context.
     assessment = client.responses.parse(
-        model="gpt-4.1-nano-2025-04-14", # Recommended model for complex structured output
+        model="gpt-4.1-mini",
         text_format=RetrofitAssessment,
         input=[
             {
                 "role": "system",
-                "content": "You are an expert in building maintenance. Your task is to assess retrofit effectiveness by analyzing repair histories. Based on the text, categorize repairs into 'damp & mould', 'windows & doors', 'leaks', and 'structural'. "
-                "For each category, assess the severity and frequency of issues before and after the retrofit on a scale of 1 to 5. Base your judgment solely on the provided text. If a category has no repairs for a particular repair category, rate its frequency as 0 and severity as 0."
-                "Also, provide a detailed summary of the property's repair history and assessment before and after the retrofit works in a detailed paragraph, this should include how occurances "
-                "for each repair type may have changed, and the causes of the issues, if the information is present in the repair description, these descriptions will "
-                "later be used by a housing expert to assess the impact of the works done in the property so make sure detail is kept regarding each repair type, include this in the 'summary' field in the required schmema."
-                "The Schema for the response is as follows:\n"
-                f"```json {RetrofitAssessment.model_json_schema()}"
+                "content": "You are an expert in building maintenance. Your task is to analyze a list of repairs. "
+                           "Based ONLY on the text provided, categorize each repair into 'damp & mould', 'windows & doors', 'leaks', and 'structural'. "
+                           "For each category, assess the overall severity on a scale of 0 to 5 and count the frequency of issues. "
+                           "If a category has no relevant repairs, you MUST rate its frequency as 0 and severity as 0. "
+                           "Base your judgment solely and strictly on the provided text."
+                           "ONLY MARK A REPAIR AS BELONGING TO A CERTAIN CATEGORY if it is EXPLICITLY mentioned as such in the repair history, "
+                           "for expample, 'leak in the roof' would be counted as a leak, but 'blocked sink' would not be counted as a leak, and "
+                           "a damp or mould issue is NOT inferred from a leak unless in the SAME repair description for that day it is EXPLICITLY mentions a damp and mould issue"
+                           f"The Schema for the response is as follows:\n```json {RetrofitAssessment.model_json_schema()}```"
             },
             {
                 "role": "user",
-                "content": f"Please analyse the following repair history for a property and return your assessment:\n\n{property_history}"
+                "content": f"Please analyse the following repair history and return your assessment:\n\n{repair_history}"
             }
-        
         ],
         temperature=0
     )
     return assessment.output_parsed
 
+def get_comparison_summary(before_history: str, after_history: str, client) -> str:
+    """
+    Generates a detailed comparative summary by sending both histories to an LLM.
+
+    Args:
+        before_history: The string of repairs before the retrofit.
+        after_history: The string of repairs after the retrofit.
+        client: The LLM client instance.
+
+    Returns:
+        A detailed paragraph summarizing the changes.
+    """
+    if not client:
+        raise ConnectionError("LLM client not initialized.")
+
+    # Call the LLM with a prompt specifically for generating a comparative summary.
+    summary_response = client.chat.completions.create(
+        model="gpt-4.1-nano-2025-04-14", # Using a powerful model for nuanced summary generation
+        messages=[
+            {
+                "role": "system",
+                "content": "You are an expert in building maintenance. Your task is to write a summary comparing a property's repair history before and after a retrofit. "
+                           "Your summary should be a detailed paragraph for a housing expert. "
+                           "Analyze how the occurrences for each repair type (damp, leaks, structural, windows/doors) may have changed between the two periods. "
+                           "If possible, infer the causes of issues based on the repair descriptions. "
+                           "Directly compare the 'BEFORE' and 'AFTER' lists to highlight improvements or new problems."
+            },
+            {
+                "role": "user",
+                "content": f"Please provide a comparative assessment of the following repair histories.\n\n"
+                           f"REPAIRS BEFORE RETROFIT: [{before_history}]\n\n"
+                           f"REPAIRS AFTER RETROFIT: [{after_history}]"
+            }
+        ],
+        temperature=0.1
+    )
+    return summary_response.choices[0].message.content
+
+# --- Main Orchestration Function ---
+
 def assess_sharing_cities(properties_df: pd.DataFrame, repairs_df: pd.DataFrame, llm_client) -> pd.DataFrame:
     """
-    Takes property and repair data, gets LLM assessments, and merges results back to the property data.
+    Orchestrates the end-to-end assessment process:
+    1. Splits repairs into 'before' and 'after' periods.
+    2. Gets independent LLM assessments for each period.
+    3. Generates a comparative summary.
+    4. Merges all results back into the property data.
     """
     if not llm_client:
-        print("\nSkipping LLM assessment because OpenAI client could not be initialized.")
+        print("\nSkipping LLM assessment because the client could not be initialized.")
         return properties_df
 
-    # 1. Merge 'estate' from properties_df into repairs_df to ensure it's available for processing.
+    # 1. Merge 'estate' from properties_df into repairs_df.
     repairs_with_estate = pd.merge(repairs_df, properties_df[['uprn_', 'estate']], left_on='50_property_ref', right_on="uprn_")
 
-    # 2. Create repair history strings from the detailed repairs_df
-    print("\n--- 2. Aggregating Repair History Strings for LLM ---")
-    property_summary = repairs_with_estate.groupby('50_property_ref').apply(create_repair_history_string).reset_index(name='repair_history')
-    print(property_summary)
-    print("-" * 50)
+    # 2. Group repairs by property reference.
+    grouped_repairs = repairs_with_estate.groupby('50_property_ref')
     
-    # 3. Iterate through summaries and get LLM assessments
     results = []
-    for _, row in property_summary.iterrows():
-        print(f"\nAnalyzing property {row['50_property_ref']}...")
+    # 3. Iterate through each property, get assessments, and generate summary.
+    for property_ref, group_df in tqdm(grouped_repairs, desc="Assessing Properties"):
+        print(f"\nAnalyzing property {property_ref}...")
         try:
-            assessment_result = get_retrofit_assessment(row['repair_history'], llm_client)
+            # Get the completion date to calculate the time spans
+            estate = group_df['estate'].iloc[0]
+            completion_date_ts = SHARING_CITIES_COMPLETION_DATES[estate]
+            
+            # Define the overall period start and end dates
+            period_start_date = datetime(2021, 1, 1).date()
+            period_end_date = datetime(2024, 12, 31).date()
+
+            # Ensure completion_date is a date object for comparison
+            completion_date = completion_date_ts.date() if isinstance(completion_date_ts, pd.Timestamp) else completion_date_ts
+
+            # Calculate the number of days in each period for normalization
+            days_before = (completion_date - period_start_date).days
+            days_after = (period_end_date - completion_date).days
+
+            # Separate repairs into before/after strings
+            before_str, after_str = create_repair_history_lists(group_df)
+
+            before_assessment = get_repair_assessment(before_str, llm_client)
+            after_assessment = get_repair_assessment(after_str, llm_client)
+            summary = get_comparison_summary(before_str, after_str, llm_client)
+
+            def annualize(frequency, days):
+                if frequency is None or frequency == 0 or days <= 0:
+                    return 0.0
+                return (frequency / days) * 365
+
+            # Flatten all results, normalizing the frequency to a per-year rate
             flat_result = {
-                '50_property_ref': row['50_property_ref'],
-                'damp_before_severity': assessment_result.damp.before.severity,
-                'damp_before_frequency': assessment_result.damp.before.frequency,
-                'damp_after_severity': assessment_result.damp.after.severity,
-                'damp_after_frequency': assessment_result.damp.after.frequency,
-                'windows_doors_before_severity': assessment_result.windows_doors.before.severity,
-                'windows_doors_before_frequency': assessment_result.windows_doors.before.frequency,
-                'windows_doors_after_severity': assessment_result.windows_doors.after.severity,
-                'windows_doors_after_frequency': assessment_result.windows_doors.after.frequency,
-                'leaks_before_severity': assessment_result.leaks.before.severity,
-                'leaks_before_frequency': assessment_result.leaks.before.frequency,
-                'leaks_after_severity': assessment_result.leaks.after.severity,
-                'leaks_after_frequency': assessment_result.leaks.after.frequency,
-                'structural_before_severity': assessment_result.structural.before.severity,
-                'structural_before_frequency': assessment_result.structural.before.frequency,
-                'structural_after_severity': assessment_result.structural.after.severity,
-                'structural_after_frequency': assessment_result.structural.after.frequency,
-                'summary': assessment_result.summary
+                '50_property_ref': property_ref,
+                'repair_history_before': before_str,
+                'repair_history_after': after_str,
+                'damp_before_severity': before_assessment.damp.severity,
+                'damp_before_frequency': annualize(before_assessment.damp.frequency, days_before),
+                'damp_after_severity': after_assessment.damp.severity,
+                'damp_after_frequency': annualize(after_assessment.damp.frequency, days_after),
+                'windows_doors_before_severity': before_assessment.windows_doors.severity,
+                'windows_doors_before_frequency': annualize(before_assessment.windows_doors.frequency, days_before),
+                'windows_doors_after_severity': after_assessment.windows_doors.severity,
+                'windows_doors_after_frequency': annualize(after_assessment.windows_doors.frequency, days_after),
+                'leaks_before_severity': before_assessment.leaks.severity,
+                'leaks_before_frequency': annualize(before_assessment.leaks.frequency, days_before),
+                'leaks_after_severity': after_assessment.leaks.severity,
+                'leaks_after_frequency': annualize(after_assessment.leaks.frequency, days_after),
+                'structural_before_severity': before_assessment.structural.severity,
+                'structural_before_frequency': annualize(before_assessment.structural.frequency, days_before),
+                'structural_after_severity': after_assessment.structural.severity,
+                'structural_after_frequency': annualize(after_assessment.structural.frequency, days_after),
+                'summary': summary
             }
             results.append(flat_result)
-            print(f"Successfully assessed property {row['50_property_ref']}.")
+            print(f"Successfully assessed property {property_ref}.")
+
         except Exception as e:
-            print(f"Could not process property {row['50_property_ref']}: {e}")
+            print(f"Could not process property {property_ref}: {e}")
     
     if not results:
+        print("No properties were successfully assessed.")
         return properties_df
 
     # 4. Merge assessment results back into the original properties DataFrame
     assessment_df = pd.DataFrame(results)
-    property_with_assement_df = pd.merge(properties_df, assessment_df, right_on='50_property_ref', left_on='uprn_')
-    final_df = pd.merge(property_with_assement_df, property_summary[['50_property_ref', 'repair_history']], on='50_property_ref')
+    final_df = pd.merge(properties_df, assessment_df, left_on='uprn_', right_on='50_property_ref')
+    
     return final_df
 
-def create_shdf_prompt_and_cutoffs(property_row: pd.Series, all_repairs_df: pd.DataFrame) -> str:
+
+def create_category_repair_histories(property_row: pd.Series, all_repairs_df: pd.DataFrame, 
+                                   issue_type: str, work_cols: list) -> Tuple[str, str, Optional[str]]:
     """
-    Creates a detailed prompt for the LLM including dynamic, per-category cut-off dates,
-    taking only the first repair description per day.
+    Creates separate before/after repair histories for a specific category.
+    Returns: (before_repairs, after_repairs, cutoff_date_str)
     """
     prop_id = property_row['uprn']
     property_repairs = all_repairs_df[all_repairs_df['nlpg_uprn_(move_to_end)'] == prop_id]
-
-    # 1. Determine the cut-off date for each issue type
-    cutoff_texts = []
-    for issue_type, work_cols in SHDF_COMPLETION_DICT.items():
-        # Get all relevant completion dates for the property for this issue type
-        dates = [pd.to_datetime(property_row.get(col), errors='coerce') for col in work_cols]
-        # Filter out any NaT (Not a Time) values
-        valid_dates = [d for d in dates if pd.notna(d)]
-        
-        if valid_dates:
-            # Find the latest date among the valid ones
-            latest_date = max(valid_dates)
-            cutoff_texts.append(f"- {issue_type}: {latest_date.strftime('%Y-%m-%d')}")
-        else:
-            cutoff_texts.append(f"- {issue_type}: Not Applicable (no relevant work completed)")
     
-    cutoff_section = "\n".join(cutoff_texts)
-
-    # 2. Format the entire repair history into a single string
+    # Determine cutoff date for this category
+    dates = [pd.to_datetime(property_row.get(col), errors='coerce') for col in work_cols]
+    valid_dates = [d for d in dates if pd.notna(d)]
+    
+    if not valid_dates:
+        # No work completed for this category - all repairs are "before"
+        if not property_repairs.empty:
+            valid_repairs = property_repairs[pd.notna(property_repairs['17_issued_date'])].copy()
+            if not valid_repairs.empty:
+                valid_repairs.loc[:, '17_issued_date'] = pd.to_datetime(valid_repairs['17_issued_date'])
+                valid_repairs = valid_repairs.sort_values(by='17_issued_date', ascending=True)
+                unique_day_repairs = valid_repairs.groupby(valid_repairs['17_issued_date'].dt.date).first()
+                repair_texts = unique_day_repairs.apply(
+                    lambda row: f"({row['17_issued_date'].date()}) {row['13_works_order_description']}", axis=1
+                ).tolist()
+                before_repairs = "; ".join(repair_texts)
+            else:
+                before_repairs = "None"
+        else:
+            before_repairs = "None"
+        return before_repairs, "None", None
+    
+    # Get the latest completion date for this category
+    cutoff_date = max(valid_dates)
+    cutoff_date_str = cutoff_date.strftime('%Y-%m-%d')
+    
+    # Filter and format repairs
     if not property_repairs.empty:
-        # Filter out NaT values from '17_issued_date' before applying strftime
         valid_repairs = property_repairs[pd.notna(property_repairs['17_issued_date'])].copy()
-
         if not valid_repairs.empty:
-            # --- MODIFICATION START ---
-            # Ensure the date column is datetime and sort chronologically
             valid_repairs.loc[:, '17_issued_date'] = pd.to_datetime(valid_repairs['17_issued_date'])
             valid_repairs = valid_repairs.sort_values(by='17_issued_date', ascending=True)
-
-            # Group by the calendar date and take the first entry for each day.
-            # This handles cases where multiple repairs were logged on the same day.
             unique_day_repairs = valid_repairs.groupby(valid_repairs['17_issued_date'].dt.date).first()
             
-            # Format the unique repairs into the desired string format
-            repair_texts = unique_day_repairs.apply(
-                lambda row: f"({row['17_issued_date'].date()}) {row['13_works_order_description']}", axis=1
-            ).tolist()
-            # --- MODIFICATION END ---
-            repair_section = "; ".join(repair_texts)
+            # Split into before/after based on cutoff
+            before_mask = unique_day_repairs['17_issued_date'] < cutoff_date
+            after_mask = unique_day_repairs['17_issued_date'] >= cutoff_date
+            
+            before_df = unique_day_repairs[before_mask]
+            after_df = unique_day_repairs[after_mask]
+            
+            # Format repair strings
+            if not before_df.empty:
+                before_texts = before_df.apply(
+                    lambda row: f"({row['17_issued_date'].date()}) {row['13_works_order_description']}", axis=1
+                ).tolist()
+                before_repairs = "; ".join(before_texts)
+            else:
+                before_repairs = "None"
+                
+            if not after_df.empty:
+                after_texts = after_df.apply(
+                    lambda row: f"({row['17_issued_date'].date()}) {row['13_works_order_description']}", axis=1
+                ).tolist()
+                after_repairs = "; ".join(after_texts)
+            else:
+                after_repairs = "None"
         else:
-            repair_section = "No repairs with valid dates on record."
+            before_repairs = "None"
+            after_repairs = "None"
     else:
-        repair_section = "No repairs on record."
+        before_repairs = "None"
+        after_repairs = "None"
+    
+    return before_repairs, after_repairs, cutoff_date_str
 
-    # 3. Construct the final prompt
-    prompt = (
-        f"Here is the complete repair history for a property: [{repair_section}]\n\n"
-        f"Please assess the property based on the following cut-off dates for each category:\n{cutoff_section}\n\n"
-        "For each category with a valid date, analyze repairs before and after that date. "
-        "For categories marked 'Not Applicable', all repairs fall into the 'before' period, and the 'after' assessment should be a default of 0 for severity and frequency."
-    )
 
-    repair_history = f"{repair_section}\n\nCut-off Dates:\n{cutoff_section}"
-    return prompt, repair_history
-
-def get_shdf_retrofit_assessment(prompt: str, client) -> RetrofitAssessment:
-    """Sends the detailed SHDF prompt to the LLM and gets a structured assessment."""
+def get_category_period_assessment(repair_history: str, category_type: str, client: OpenAI) -> SHDFRepairAssessment:
+    """Analyzes a single category's repair history for one time period."""
     if not client:
         raise ConnectionError("OpenAI client not initialized.")
-
-    system_prompt = f"""You are an expert in building maintenance. Your task is to assess retrofit effectiveness by analyzing a property's repair history against specific work completion dates.
-      You will be given a full repair history and a list of cut-off dates for 4 different issue categories ('damp & mould', 'windows & doors', 'leaks', and 'structural'). 
-      For each category, you must assess the severity and frequency of issues 'before' and 'after' its specific cut-off date. 
-      #Key Rules:
-      1. leave the 'after' field empty ONLY IF the cut-off date is 'Not Applicable' for that category, otherwise, default the 'after' severity and frequency to 1.
-      2. If a category has no recorded repairs for the particular repair type before or after the cut off point, rate its frequency as 0 and severity as 0, DO NOT leave it empty. 
-      3. PLEASE put the frequency and severity as 0 if there are no recorded issues for that category.
-      The Schema for the response is as follows:\n
-    ```json {RetrofitAssessment.model_json_schema()}"""
-
+    
+    # Category-specific instructions
+    category_instructions = {
+        'damp & mould': "Assess damp and mould issues. Only count repairs explicitly mentioning mould, damp, condensation, or moisture problems. Severe cases involve black mould or mouldy walls in multiple rooms.",
+        'windows & doors': "Assess windows and doors issues. Only count repairs explicitly mentioning window or door functionality problems. Ignore lost keys or minor issues. Severe cases involve broken windows or doors that don't close properly.",
+        'leaks': "Assess leak issues. Only count repairs explicitly mentioning leaks, water ingress, or water damage. Ignore blockages or minor plumbing issues. Severe cases involve significant water damage requiring major repairs.",
+        'structural': "Assess structural and wall issues. Only count repairs explicitly mentioning structural damage, wall damage, or safety-related building issues. Severe cases involve damage requiring major repairs or posing safety risks."
+    }
+    
+    instruction = category_instructions.get(category_type, f"Assess {category_type} issues based on the repair descriptions.")
+    
     assessment = client.responses.parse(
-        model="gpt-4.1-mini", # Recommended model for complex structured output
-        text_format=RetrofitAssessment,
+        model="gpt-4.1-nano-2025-04-14",
+        text_format=SHDFRepairAssessment,
         input=[
             {
                 "role": "system",
-                "content": system_prompt
+                "content": f"You are an expert in building maintenance. {instruction} "
+                "Assess the severity (1-5 scale, 0 if none) and frequency (count of occurrences, 0 if none) "
+                "based solely on the provided repair history. You are analyzing repairs for a specific time period - "
+                "focus only on the repairs listed and do not make assumptions about other time periods."
+                "ONLY MARK A REPAIR AS BELONGING TO A CERTAIN CATEGORY if it is EXPLICITLY mentioned as such in the repair history, "
+                "for expample, 'leak in the roof' would be counted as a leak, but 'blocked sink' would not be counted as a leak, and "
+                "a damp or mould issue is NOT inferred from a leak unless in the SAME repair description for that day it is EXPLICITLY mentions a damp and mould issue"
             },
             {
                 "role": "user",
-                "content": prompt
+                "content": f"Please analyze these {category_type} repairs and assess severity and frequency:\n\nREPAIRS: [{repair_history}]"
             }
-        
         ],
         temperature=0
     )
     return assessment.output_parsed
 
+def get_overall_repair_summary(all_category_data: Dict, client: OpenAI) -> OverallRepairSummary:
+    """Creates a comprehensive summary of all repair categories and their assessments."""
+    if not client:
+        raise ConnectionError("OpenAI client not initialized.")
+    
+    # Format all category data for the summary
+    summary_data = "COMPREHENSIVE REPAIR ANALYSIS\n\n"
+    
+    for category, data in all_category_data.items():
+        cutoff_info = f"Intervention completed: {data['cutoff_date']}" if data['cutoff_date'] else "No intervention completed"
+        
+        summary_data += f"{category.upper()}:\n"
+        summary_data += f"- {cutoff_info}\n"
+        summary_data += f"- Before: Repairs [{data['before_history']}] | Severity {data['before_assessment'].severity}, Frequency {data['before_assessment'].frequency}\n"
+        summary_data += f"- After: Repairs [{data['after_history']}] | Severity {data['after_assessment'].severity}, Frequency {data['after_assessment'].frequency}\n\n"
+    
+    summary = client.responses.parse(
+        model="gpt-4.1-nano-2025-04-14",
+        text_format=OverallRepairSummary,
+        input=[
+            {
+                "role": "system",
+                "content": "You are a housing expert analyzing comprehensive repair data across multiple categories. "
+                "Create a detailed summary that compares repair patterns before and after interventions across all categories. "
+                "Include specific details about repair types, causes when available, and assess the overall effectiveness "
+                "of the retrofit interventions. This summary will be used by housing experts to evaluate intervention impacts."
+            },
+            {
+                "role": "user",
+                "content": f"Create a comprehensive summary based on this multi-category repair analysis:\n\n{summary_data}"
+            }
+        ],
+        temperature=0
+    )
+    return summary.output_parsed
+
+
 def process_shdf_assessments(properties_df: pd.DataFrame, repairs_df: pd.DataFrame, client) -> pd.DataFrame:
     """
-    Main function to process SHDF data, get LLM assessments, and merge results.
+    Main function to process SHDF data with separate category assessments.
     """
     if not client:
         print("\nSkipping LLM assessment because OpenAI client could not be initialized.")
         return properties_df
-
-    # Filter for properties with 'Completed' status before processing
+    
+    # Filter for properties with 'Completed' status
     if 'Property Status ' in properties_df.columns:
         properties_to_process = properties_df[properties_df['Property Status '] == 'Completed'].copy()
         print(f"\nFound {len(properties_to_process)} properties with status 'Completed'. Processing these...")
     else:
         print("\n'Property Status ' column not found. Processing all properties.")
         properties_to_process = properties_df.copy()
-
+    
     results = []
-    # Iterate only over the filtered DataFrame
-    for _, row in properties_to_process.iterrows():
+
+    for _, row in tqdm(properties_to_process.iterrows(), desc="Assessing Properties"):
         prop_id = row['uprn']
         print(f"\nAnalyzing property {prop_id}...")
         
-        # 1. Create the dynamic prompt for this property
-        prompt, repair_history = create_shdf_prompt_and_cutoffs(row, repairs_df)
-        print("   - Generated Prompt Snippet:")
-        print(f"   {prompt.splitlines()[2]}\n   {prompt.splitlines()[3]}...") # Print a snippet for verification
+        property_result = {'uprn': prop_id}
+        repair_histories = {}
+        all_category_data = {}
         
-        # 2. Get the assessment from the LLM
         try:
-            assessment_result = get_shdf_retrofit_assessment(prompt, client)
-            flat_result = {'uprn': prop_id, 'repair_history': repair_history}
-
-            # Helper function to safely get severity/frequency, handling None/NaN
-            def get_value(assessment_helper: Optional[RepairAssessmentHelper], field_name: str):
-                if assessment_helper:
-                    # Access attribute dynamically
-                    value = getattr(assessment_helper, field_name)
-                    # Convert None to NaN for consistency when putting into DataFrame
-                    return value if value is not None else pd.NA
-                return pd.NA # If the helper itself is None, return NaN for its fields
-
-            # Process 'damp' category
-            flat_result['damp_before_severity'] = get_value(assessment_result.damp.before, 'severity')
-            flat_result['damp_before_frequency'] = get_value(assessment_result.damp.before, 'frequency')
-            flat_result['damp_after_severity'] = get_value(assessment_result.damp.after, 'severity')
-            flat_result['damp_after_frequency'] = get_value(assessment_result.damp.after, 'frequency')
-
-            # Process 'windows_doors' category
-            flat_result['windows_doors_before_severity'] = get_value(assessment_result.windows_doors.before, 'severity')
-            flat_result['windows_doors_before_frequency'] = get_value(assessment_result.windows_doors.before, 'frequency')
-            flat_result['windows_doors_after_severity'] = get_value(assessment_result.windows_doors.after, 'severity')
-            flat_result['windows_doors_after_frequency'] = get_value(assessment_result.windows_doors.after, 'frequency')
-
-            # Process 'leaks' category
-            flat_result['leaks_before_severity'] = get_value(assessment_result.leaks.before, 'severity')
-            flat_result['leaks_before_frequency'] = get_value(assessment_result.leaks.before, 'frequency')
-            flat_result['leaks_after_severity'] = get_value(assessment_result.leaks.after, 'severity')
-            flat_result['leaks_after_frequency'] = get_value(assessment_result.leaks.after, 'frequency')
-
-            # Process 'structural' category
-            flat_result['structural_before_severity'] = get_value(assessment_result.structural.before, 'severity')
-            flat_result['structural_before_frequency'] = get_value(assessment_result.structural.before, 'frequency')
-            flat_result['structural_after_severity'] = get_value(assessment_result.structural.after, 'severity')
-            flat_result['structural_after_frequency'] = get_value(assessment_result.structural.after, 'frequency')
-
-            # Add summary
-            flat_result['summary'] = assessment_result.summary
-
-            results.append(flat_result)
-            print(f"    - Successfully assessed property {prop_id}.")
+            # Process each category separately
+            for issue_type, work_cols in SHDF_COMPLETION_DICT.items():
+                print(f"  - Processing {issue_type}...")
+                
+                # Get separate repair histories for this category
+                before_history, after_history, cutoff_date = create_category_repair_histories(
+                    row, repairs_df, issue_type, work_cols
+                )
+                
+                # Store repair histories
+                repair_histories[f'{issue_type}_before_history'] = before_history
+                repair_histories[f'{issue_type}_after_history'] = after_history
+                repair_histories[f'{issue_type}_cutoff_date'] = cutoff_date
+                
+                # Get separate assessments for before and after periods
+                print(f"    - Assessing before period for {issue_type}...")
+                before_assessment = get_category_period_assessment(before_history, issue_type, client)
+                
+                print(f"    - Assessing after period for {issue_type}...")
+                after_assessment = get_category_period_assessment(after_history, issue_type, client)
+                
+                # Store all data for this category for the overall summary
+                all_category_data[issue_type] = {
+                    'before_history': before_history,
+                    'after_history': after_history,
+                    'cutoff_date': cutoff_date,
+                    'before_assessment': before_assessment,
+                    'after_assessment': after_assessment
+                }
+                
+                # Store results with consistent naming
+                category_prefix = issue_type.replace(' & ', '_').replace(' ', '_')
+                property_result[f'{category_prefix}_before_severity'] = before_assessment.severity
+                property_result[f'{category_prefix}_before_frequency'] = before_assessment.frequency
+                property_result[f'{category_prefix}_after_severity'] = after_assessment.severity
+                property_result[f'{category_prefix}_after_frequency'] = after_assessment.frequency
+            
+            # Create overall summary in a separate LLM pass
+            print("  - Creating overall repair summary...")
+            overall_summary = get_overall_repair_summary(all_category_data, client)
+            
+            # Store final results
+            property_result['repair_history'] = str(repair_histories)
+            property_result['summary'] = overall_summary.summary
+            
+            results.append(property_result)
+            print(f"  Successfully assessed property {prop_id}.")
+            
         except Exception as e:
-            print(f"   - Could not process property {prop_id}: {e}")
+            print(f"  Could not process property {prop_id}: {e}")
     
     if not results:
         return properties_df
-
-    # 3. Merge assessment results back into the original properties DataFrame
+    
+    # Merge results back into original DataFrame
     assessment_df = pd.DataFrame(results)
     final_df = pd.merge(properties_df, assessment_df, on='uprn')
     return final_df
@@ -570,6 +789,135 @@ def get_damp_assessment(property_history: str, client: OpenAI) -> DampAssessment
         temperature=0
     )
     return assessment.output_parsed
+
+def extract_key_takeaways(repair_summary: str, client) -> RepairTypeKeyTakeaways:
+    """
+    Extracts key takeaways for each repair type from a comprehensive repair summary.
+    
+    Args:
+        repair_summary: The detailed comparative repair summary
+        client: The LLM client instance
+    
+    Returns:
+        RepairTypeKeyTakeaways model with concise takeaways for each repair category
+    """
+    if not client:
+        raise ConnectionError("LLM client not initialized.")
+    
+    system_prompt = """You are a housing expert analyzing retrofit effectiveness. Your task is to extract key takeaways for each repair category from a comprehensive repair summary.
+
+Context: This summary analyzes the impact of retrofitting works (like insulation, heating system upgrades, window replacements, etc.) on different types of property maintenance issues. The retrofit aims to improve energy efficiency and reduce maintenance problems.
+
+For each repair category (damp/mould, windows/doors, leaks, structural), provide a concise takeaway that:
+1. Summarizes whether the retrofit was effective for that repair type
+2. Notes any significant improvements or ongoing issues
+3. Indicates the overall trend (improved, worsened, no change)
+
+Keep each takeaway to 2-3 sentences maximum. Focus on the practical impact for housing managers and residents."""
+
+    takeaways = client.responses.parse(
+        model="gpt-4.1-nano-2025-04-14",  
+        text_format=RepairTypeKeyTakeaways,
+        input=[
+            {
+                "role": "system",
+                "content": system_prompt
+            },
+            {
+                "role": "user", 
+                "content": f"Please extract key takeaways for each repair type from this comprehensive repair analysis:\n\n{repair_summary}"
+            }
+        ],
+        temperature=0
+    )
+    return takeaways.output_parsed
+
+def process_repair_summary_takeaways(properties_with_summaries_df: pd.DataFrame, client) -> pd.DataFrame:
+    """
+    Processes existing repair summaries to extract key takeaways for each repair type.
+    
+    Args:
+        properties_with_summaries_df: DataFrame containing properties with 'summary' column
+        client: The LLM client instance
+        
+    Returns:
+        DataFrame with additional takeaway columns for each repair type
+    """
+    if not client:
+        print("\nSkipping takeaway extraction because LLM client could not be initialized.")
+        return properties_with_summaries_df
+    
+    if 'summary' not in properties_with_summaries_df.columns:
+        print("\nNo 'summary' column found in the DataFrame. Cannot extract takeaways.")
+        return properties_with_summaries_df
+    
+    results = []
+    
+    for _, row in tqdm(properties_with_summaries_df.iterrows(), 
+                      total=len(properties_with_summaries_df), 
+                      desc="Extracting Key Takeaways",
+                      ):
+        
+        property_id = row.get('uprn', row.get('uprn_', row.get('50_property_ref', 'Unknown')))
+        summary = row['summary']
+        
+        try:
+            print(f"Extracting takeaways for property {property_id}...")
+            
+            # Extract key takeaways using LLM
+            takeaways = extract_key_takeaways(summary, client)
+            
+            # Create result record
+            result = {
+                'property_id': property_id,
+                'damp_mould_takeaway': takeaways.damp_mould_takeaway,
+                'windows_doors_takeaway': takeaways.windows_doors_takeaway,  
+                'leaks_takeaway': takeaways.leaks_takeaway,
+                'structural_takeaway': takeaways.structural_takeaway
+            }
+            
+            results.append(result)
+            print(f"  Successfully extracted takeaways for property {property_id}.")
+            
+        except Exception as e:
+            print(f"  Could not extract takeaways for property {property_id}: {e}")
+            # Add empty takeaways for failed extractions
+            result = {
+                'property_id': property_id,
+                'damp_mould_takeaway': "Takeaway extraction failed",
+                'windows_doors_takeaway': "Takeaway extraction failed",
+                'leaks_takeaway': "Takeaway extraction failed", 
+                'structural_takeaway': "Takeaway extraction failed"
+            }
+            results.append(result)
+    
+    if not results:
+        print("No takeaways were successfully extracted.")
+        return properties_with_summaries_df
+    
+    # Convert results to DataFrame
+    takeaways_df = pd.DataFrame(results)
+    
+    # Determine the correct column name for merging
+    merge_column = None
+    for col in ['uprn', 'uprn_', '50_property_ref']:
+        if col in properties_with_summaries_df.columns:
+            merge_column = col
+            break
+    
+    if merge_column is None:
+        print("Could not find a suitable column for merging takeaways back to the original data.")
+        return properties_with_summaries_df
+    
+    # Merge takeaways back to original DataFrame
+    final_df = pd.merge(properties_with_summaries_df, takeaways_df, 
+                       left_on=merge_column, right_on='property_id', how='left')
+    
+    # Drop the temporary property_id column
+    final_df = final_df.drop('property_id', axis=1)
+    
+    print(f"\nSuccessfully added takeaway columns to {len(final_df)} properties.")
+    return final_df
 
 def process_damp_assessments(df: pd.DataFrame, input_column_name: str, client: OpenAI) -> pd.DataFrame:
     """
@@ -716,7 +1064,7 @@ def generate_sharing_cities_summaries():
     """
     # Load the Sharing Cities data
     print("\n--- Loading Sharing Cities Data ---")
-    sharing_cities_df = pd.read_excel("data\\sharing_cities_property_list.xlsx")
+    sharing_cities_df = pd.read_excel("data\\sharing_cities_property_summaries.xlsx")
     repairs_df = pd.read_excel("data\\sharing_cities_repairs_data.xlsx")
 
     if sharing_cities_df.empty or repairs_df.empty:
@@ -768,6 +1116,15 @@ def generate_shdf_summaries():
     print("--- Saving Final Results ---")
     final_df.to_excel(OUTPUT_FILE_PATH, index=False)
 
+def run_key_takeaways_analysis():
+    df = pd.read_excel(OUTPUT_FILE_PATH)
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    if not client:
+        print("\nSkipping key takeaways extraction because OpenAI client could not be initialized.")
+        return
+    df_with_takeaways = process_repair_summary_takeaways(df, client)
+    df_with_takeaways.to_excel(OUTPUT_FILE_PATH, index=False)
+
 def run_wates_analysis():
     df = pd.read_excel("data\\shdf_property_summaries_with_llm.xlsx")
     #df = process_damp_assessments(df, 'Mould Location and if Urgent', OpenAI(api_key=os.environ.get("OPENAI_API_KEY")))
@@ -817,5 +1174,6 @@ def main():
 if __name__ == "__main__":
     #main()
     #generate_sharing_cities_summaries()
-    generate_shdf_summaries()
+    #generate_shdf_summaries()
     #run_wates_analysis()
+    run_key_takeaways_analysis()

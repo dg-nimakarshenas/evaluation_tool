@@ -470,9 +470,8 @@ elif st.session_state.page == "chat":
                 st.rerun()
     
     translation_llm = get_llm_for_translation()
-    lang = st.session_state.get("language", "English")
+    current_lang = st.session_state.get("current_language", st.session_state.get("language", "English"))
 
-    @st.cache_data(show_spinner=f"Preparing chat in {lang}...")
     def get_chat_ui_translations(_lang):
         ui = {
             "chat_title": "Extra Care Feedback Chatbot",
@@ -490,10 +489,15 @@ elif st.session_state.page == "chat":
             "chat_placeholder": "Write your message here...",
             "transcribing_audio": "Transcribing audio...",
         }
-        if _lang == "English": return ui
-        return {k: translate_text(v, _lang, translation_llm) for k, v in ui.items()}
+        if _lang == "English": 
+            return ui
+        
+        translated_texts = {}
+        for key, text in ui.items():
+            translated_texts[key] = translate_text(text, _lang, translation_llm)
+        return translated_texts
 
-    T_CHAT = get_chat_ui_translations(lang)
+    T_CHAT = get_chat_ui_translations(current_lang)
 
     # Update timeout messages with translated text
     if "last_interaction_time" in st.session_state:
@@ -562,10 +566,10 @@ elif st.session_state.page == "chat":
              self.container.markdown(self.text)
 
     class ContextChatbot:
-        def __init__(self):
+        def __init__(self, ui_text=T_CHAT):
             self.audio_llm, self.llm = configure_llm()
+            self.ui_text = ui_text
             self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY")) if os.getenv("OPENAI_API_KEY") else None
-            
 
         def setup_chain(self):
             if "chain" in st.session_state and st.session_state.chain:
@@ -607,23 +611,23 @@ elif st.session_state.page == "chat":
             except Exception as e:
                  st.error(f"Failed to create ConversationChain: {e}")
                  return None
-
+        
         def change_language_callback(self):
+            """
+            Callback function to handle language change.
+            This updates the system prompt, chat history, and memory to reflect the new language.
+            """
+            print(f"Language callback triggered. Selected: {st.session_state.language}")
+            
+            # Get previous and new language
+            new_language = st.session_state.language
+            print(f"Language change callback triggered for new language: {new_language}")
+            
             if "chain" not in st.session_state or not st.session_state.chain:
                 print("Warning: Chain not found in session state during language change.")
-                st.error("An error occurred. Please refresh the page or restart the chat.")
                 return
             
             chain = st.session_state.chain
-            new_language = st.session_state.language
-            old_language = st.session_state.get("current_language", "English")
-            
-            if new_language == old_language:
-                print("Language change callback triggered but no change detected.")
-                return
-            
-            print(f"Language change callback triggered. From {old_language} to {new_language}")
-            st.session_state.current_language = new_language
 
             # 1. Find the last assistant message in the official history
             last_assistant_message_content = None
@@ -641,35 +645,30 @@ elif st.session_state.page == "chat":
                 chain.prompt.messages[0] = SystemMessagePromptTemplate.from_template(system_template)
                 print("System prompt updated in chain.")
 
-                # 3. Add system guidance message to history and memory (for context)
+                # 3. Add system guidance message to history and memory
                 system_guidance = f"System Notification: The conversation language has now changed to {new_language}. Please continue the conversation ONLY in {new_language}."
                 st.session_state.setdefault("messages", []).append({"role": 'system', "content": system_guidance})
                 if hasattr(chain.memory, 'chat_memory'):
-                     chain.memory.chat_memory.add_message(SystemMessage(content=system_guidance))
-                     print("System guidance message added to history and memory.")
+                    chain.memory.chat_memory.add_message(SystemMessage(content=system_guidance))
+                    print("System guidance message added to history and memory.")
                 else:
-                     print("Warning: chat_memory not found on chain.memory.")
-                # 4. Translate the last assistant message (if found) and store for later display
-                st.session_state.pop("display_translated_message", None) # Clear any previous pending message
+                    print("Warning: chat_memory not found on chain.memory.")
+                    
+                # 4. Translate the last assistant message (if found)
+                st.session_state.pop("display_translated_message", None)
                 if last_assistant_message_content:
                     print("Attempting to translate the last assistant message.")
                     with st.spinner(f"Translating last message to {new_language}..."):
-                        # Call the global function
                         translated_content = translate_text(last_assistant_message_content, new_language, self.llm)
-
                     if translated_content:
-                         print("Storing translated message for display.")
-                         # Store the translated message to be displayed in the main function flow
-                         st.session_state.display_translated_message = translated_content
+                        print("Storing translated message for display.")
+                        st.session_state.display_translated_message = translated_content
                     else:
-                         print("Translation failed or returned empty.")
+                        print("Translation failed or returned empty.")
 
             except Exception as e:
                 print(f"Error during language change processing: {e}")
-                st.error(f"Error applying language change: {e}")
-            
-            st.rerun()  # Rerun to refresh the UI with the new language context
-            
+                st.error(f"Error applying language change: {e}")           
 
             # A rerun might still be needed implicitly by Streamlit due to state change
 
@@ -690,20 +689,22 @@ elif st.session_state.page == "chat":
                 st.session_state.language = "English"
                 current_language = "English"
                 st.rerun()
-                
+            
+            T_CHAT_CURRENT = get_chat_ui_translations(st.session_state.language)
+
             # --- Language Selection ---
             st.selectbox(
                 key='language',
-                label=T_CHAT['change_lang_label'],
+                label=T_CHAT_CURRENT['change_lang_label'],
                 options=LANGUAGE_OPTIONS,
                 index=LANGUAGE_OPTIONS.index(st.session_state.language),
                 on_change=self.change_language_callback
             )
 
             # --- Save Conversation Button ---
-            if st.button(T_CHAT["end_button"], key="end_conversation_button"): # Use translated text
-                # This message will be in English unless translated separately
-                st.info(T_CHAT["ending_toast"])
+            if st.button(T_CHAT_CURRENT["end_button"], key="end_conversation_button"): # Use translated text
+                # This message will be in the current language
+                st.info(T_CHAT_CURRENT["ending_toast"])
                 save_conversation_data()
 
                 # Clear chat-specific state, keep user details for form prefill
@@ -713,9 +714,9 @@ elif st.session_state.page == "chat":
                     st.session_state.pop(key, None)
 
                 st.session_state.page = "form"
-                # This toast message will be in English
-                st.toast(T_CHAT["ended_toast"], icon="👋")
+                st.toast(T_CHAT_CURRENT["ended_toast"], icon="👋")
                 st.rerun()
+
             # --- Initialize Chat History and First Message ---
             if "messages" not in st.session_state:
                 st.session_state.messages = []
@@ -766,6 +767,8 @@ elif st.session_state.page == "chat":
                 st.session_state.pop("display_translated_message", None)
 
             # --- User Input Handling (Text and Audio) ---
+            
+            processed_input = None
             user_text = st.chat_input(placeholder=T_CHAT["chat_placeholder"])
             audio_bytes = st.audio_input(T_CHAT['audio_prompt'])
 

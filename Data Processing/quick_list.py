@@ -3,10 +3,9 @@ from numpy import nan
 import numpy as np
 
 og_data = pd.read_excel("data\\shdf_property_summaries_with_llm.xlsx")
-#new_llm_data = pd.read_excel("data\\shdf_property_summaries_with_llm_2.xlsx")
+new_llm_data = pd.read_excel("data\\shdf_property_summaries_with_llm_2.xlsx")
 #rasheed_data = pd.read_excel("data\\Evaluation_Framework DG Cities New.xlsx", sheet_name="MeasuresCompletion")
 llm_anaysis_column_names = [
-    "repair_history",
     "damp_before_severity",
     "damp_before_frequency",
     "damp_after_severity",
@@ -26,7 +25,10 @@ llm_anaysis_column_names = [
     "summary",
     "uprn"
 ]
-#final_df = pd.merge(og_data, new_llm_data[llm_anaysis_column_names], on="uprn", how="left")
+
+takeaway_cols = ["damp_mould_takeaway",	"windows_doors_takeaway","leaks_takeaway","structural_takeaway", "uprn"]
+
+final_df = pd.merge(og_data, new_llm_data[takeaway_cols], on="uprn", how="left")
 #priorities = pd.read_excel("data\\shdf_priorities.xlsx")
 
 #final_df = pd.merge(priorities, og_data[column_names], on="uprn", how="left")
@@ -161,5 +163,5 @@ abbreviations = {
 # og_data['Average Cost per measure'] = (og_data['Total Order Value'] / og_data['Number of works completed']).replace([np.inf, -np.inf], 0).fillna(0)
 
 
-final_df = og_data.copy()
+#final_df = og_data.copy()
 final_df.to_excel("data\\shdf_property_summaries_with_llm.xlsx", index=False)
