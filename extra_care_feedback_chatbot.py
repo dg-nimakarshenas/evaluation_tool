@@ -32,7 +32,7 @@ DB_HOST = os.getenv("DB_HOST", "aws-0-eu-west-2.pooler.supabase.com")
 DB_PORT = os.getenv("DB_PORT", "6543")
 
 # --- Database Connection Function with Streamlit Caching ---
-@st.cache_resource  # This decorator does the magic!
+@st.cache_resource  
 def get_db_connection():
     """
     Establishes and returns a database connection.
@@ -55,7 +55,6 @@ def get_db_connection():
         return conn
     except psycopg2.Error as e:
         print(f"Failed to connect to database (cache_resource): {e}")
-        st.error(f"Database Connection Error: {e}. Please check settings or server status.")
         return None # Return None if connection fails
 
 # --- Attempt to establish DB connection when app loads/script runs ---
