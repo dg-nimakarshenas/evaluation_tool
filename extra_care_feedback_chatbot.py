@@ -157,12 +157,12 @@ def save_conversation_data():
         contact_details = st.session_state.get("contact_details", "N/A")
 
         insert_conversation_query = """
-        INSERT INTO conversations (timestamp, language, role, address, contact_details)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO conversations (timestamp, language, role, address, contact_details, feedback_type)
+        VALUES (%s, %s, %s, %s, %s, %s)
         RETURNING id;
         """
         cur.execute(insert_conversation_query, (
-            conversation_timestamp_str, language, user_role, address, contact_details
+            conversation_timestamp_str, language, user_role, address, contact_details, "Extra Care Housing Feedback"
         ))
         conversation_id = cur.fetchone()[0]
 
